@@ -573,7 +573,7 @@ export default function App() {
     );
   }
 
-  // --- COZY LOGIN SCREEN (CATS REMOVED) ---
+  // --- COZY LOGIN SCREEN ---
   if (!user) {
     return (
       <div style={{
@@ -778,7 +778,6 @@ export default function App() {
                   flexDirection: 'column',
                   gap: '16px'
                 }}>
-                  {/* Top Header: Uniform circular X button */}
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-10px' }}>
                     <button 
                       onClick={() => setIsAccountMenuOpen(false)}
@@ -788,7 +787,6 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Profile Info: Avatar on left, Name & Email on left */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                     <div style={{ width: '50px', height: '50px', borderRadius: '50%', overflow: 'hidden', border: '1.5px solid #ffd166', background: '#ffd166', flexShrink: '0' }}>
                       <img src={STRAWBERRY_CAT_URL} alt="Strawberry Cat" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -803,7 +801,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Sign Out Button (Yellow) */}
                   <button
                     onClick={handleLogout}
                     style={{
@@ -1385,7 +1382,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Cancel left, Action right */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsOrderModalOpen(false)} style={getButtonStyle('light')}>Cancel</button>
                 <button type="submit" style={getButtonStyle('primary')}>
@@ -1435,6 +1431,23 @@ export default function App() {
                   <input type="number" step="0.01" name="latestCost" value={wishlistFormData.latestCost} onChange={handleWishlistInputChange} placeholder="Leave empty if same" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
                 </div>
               </div>
+
+              {/* LIVE COMPUTATION PREVIEW BOX */}
+              {wishlistFormData.initialCost !== '' && !isNaN(Number(wishlistFormData.initialCost)) && (
+                <div style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#7f5539' }}>
+                    <span>Initial Total: <strong>₱{(Number(wishlistFormData.qty || 1) * Number(wishlistFormData.initialCost)).toFixed(2)}</strong></span>
+                    <span>Latest Total: <strong>₱{(Number(wishlistFormData.qty || 1) * (wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : Number(wishlistFormData.initialCost))).toFixed(2)}</strong></span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '2px', borderTop: '1px dashed #e6ccb2' }}>
+                    {renderPriceFlag(
+                      Number(wishlistFormData.qty || 1), 
+                      Number(wishlistFormData.initialCost), 
+                      wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : Number(wishlistFormData.initialCost)
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Cancel left, Action right */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
