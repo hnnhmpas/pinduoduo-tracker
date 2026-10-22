@@ -18,6 +18,10 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 
+// Strawberry Cat Avatar & Peeking Cats Banner Constants
+const STRAWBERRY_CAT_URL = "https://i.imgur.com/8Xv2g3t.png";
+const PEEKING_CATS_URL = "https://i.imgur.com/Kz8q1w3.png";
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -61,7 +65,6 @@ export default function App() {
     }
 
     setLoading(true);
-    // Private user sub-collections: users/{userId}/pdd_orders and users/{userId}/pdd_wishlist
     const ordersColRef = collection(db, "users", user.uid, "pdd_orders");
     const wishlistColRef = collection(db, "users", user.uid, "pdd_wishlist");
 
@@ -86,18 +89,24 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('orders');
   const [selectedBatch, setSelectedBatch] = useState('All Batches');
   const [isBatchDropdownOpen, setIsBatchDropdownOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  
   const dropdownRef = useRef(null);
+  const accountMenuRef = useRef(null);
 
   // MODAL FORM CUSTOM DROPDOWN STATES
   const [modalBatchOpen, setModalBatchOpen] = useState(false);
   const [modalShippingOpen, setModalShippingOpen] = useState(false);
   const [modalOrderStatusOpen, setModalOrderStatusOpen] = useState(false);
 
-  // Close custom dropdown on outside click
+  // Close custom dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsBatchDropdownOpen(false);
+      }
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target)) {
+        setIsAccountMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -122,8 +131,8 @@ export default function App() {
   const [isWishlistModalOpen, setIsWishlistModalOpen] = useState(false);
   const [editingWishlistItem, setEditingWishlistItem] = useState(null);
 
-  const [isGuideOpen, setIsGuideOpen] = useState(false); // Shipping Guide Modal
-  const [guideActiveStep, setGuideActiveStep] = useState(null); // Highlight clicked shipping step
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [guideActiveStep, setGuideActiveStep] = useState(null);
 
   // FORM STATES
   const [orderFormData, setOrderFormData] = useState({
@@ -145,7 +154,6 @@ export default function App() {
     latestCost: ''
   });
 
-  // HELPER FORMULAS: Est. Delivery = Date + 1 Month and 5 Days
   const calculateEstDelivery = (orderDateStr) => {
     if (!orderDateStr) return '';
     const date = new Date(orderDateStr);
@@ -163,11 +171,10 @@ export default function App() {
     return diffDays >= 0 ? diffDays : null;
   };
 
-  // UNIFORM CUTE BUTTON STYLE HELPER
   const getButtonStyle = (variant = 'default', customBg, customColor) => {
     let bg = customBg || '#f2e8cf';
     let color = customColor || '#5c4033';
-    let border = '1px solid #e6ccb2';
+    let border = '1px solid #ffd166';
 
     if (variant === 'primary') {
       bg = '#ffd166';
@@ -217,41 +224,15 @@ export default function App() {
     let color = '#5c4033';
     
     switch(status) {
-      case 'Ordered':
-        bg = '#ffffff';
-        color = '#5c4033';
-        break;
-      case 'At China Warehouse':
-        bg = '#ffcfc9';
-        color = '#5c4033';
-        break;
-      case 'Dispatched / China Customs':
-        bg = '#c9daf8';
-        color = '#03045e';
-        break;
-      case 'In Transit to PH':
-        bg = '#fdd6a8';
-        color = '#5c4033';
-        break;
-      case 'PH Customs Clearance':
-        bg = '#e6cff2';
-        color = '#3c096c';
-        break;
-      case 'PH Hub / Out for Local Delivery':
-        bg = '#fcf2cd';
-        color = '#5c4033';
-        break;
-      case 'Delivered':
-        bg = '#d4edbc';
-        color = '#1b4332';
-        break;
-      case 'Undelivered':
-        bg = '#e37373';
-        color = '#ffffff';
-        break;
-      default:
-        bg = '#ffffff';
-        color = '#5c4033';
+      case 'Ordered': bg = '#ffffff'; color = '#5c4033'; break;
+      case 'At China Warehouse': bg = '#ffcfc9'; color = '#5c4033'; break;
+      case 'Dispatched / China Customs': bg = '#c9daf8'; color = '#03045e'; break;
+      case 'In Transit to PH': bg = '#fdd6a8'; color = '#5c4033'; break;
+      case 'PH Customs Clearance': bg = '#e6cff2'; color = '#3c096c'; break;
+      case 'PH Hub / Out for Local Delivery': bg = '#fcf2cd'; color = '#5c4033'; break;
+      case 'Delivered': bg = '#d4edbc'; color = '#1b4332'; break;
+      case 'Undelivered': bg = '#e37373'; color = '#ffffff'; break;
+      default: bg = '#ffffff'; color = '#5c4033';
     }
 
     return {
@@ -300,7 +281,6 @@ export default function App() {
     );
   };
 
-  // HANDLERS
   const handleOrderInputChange = (e) => {
     const { name, value } = e.target;
     setOrderFormData(prev => ({ ...prev, [name]: value }));
@@ -464,7 +444,6 @@ export default function App() {
     }
   };
 
-  // GLOBAL PROACTIVE SEARCH & FILTER COMPUTATIONS
   const query = searchQuery.trim().toLowerCase();
 
   const batchFilteredOrders = selectedBatch === 'All Batches' 
@@ -518,7 +497,6 @@ export default function App() {
   ];
   const orderStatusOptions = ['-- None --', 'OK ✔', 'Missing', 'Damaged', 'Refunded'];
 
-  // Orders Dashboard Metrics Calculations
   const totalOrdersCount = batchFilteredOrders.length;
   const deliveredCount = batchFilteredOrders.filter(o => o.shippingStatus === 'Delivered').length;
   const missingRefundedCount = batchFilteredOrders.filter(o => o.orderStatus === 'Missing' || o.orderStatus === 'Damaged' || o.orderStatus === 'Refunded').length;
@@ -588,7 +566,6 @@ export default function App() {
     );
   };
 
-  // --- AUTH CHECK LOADING SCREEN ---
   if (authLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#fdfbf7', color: '#7f5539', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
@@ -597,7 +574,7 @@ export default function App() {
     );
   }
 
-  // --- COZY LOGIN SCREEN ---
+  // --- COZY LOGIN SCREEN WITH PEEKING CATS ---
   if (!user) {
     return (
       <div style={{
@@ -614,42 +591,51 @@ export default function App() {
         top: 0,
         left: 0
       }}>
-        <div style={{
-          background: '#fffdfa',
-          padding: '35px',
-          borderRadius: '20px',
-          boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)',
-          borderTop: '6px solid #ffd166',
-          border: '1px solid #e6ccb2',
-          maxWidth: '400px',
-          width: '100%',
-          textAlign: 'center',
-          boxSizing: 'border-box'
-        }}>
-          <h1 style={{ margin: '0 0 10px 0', color: '#7f5539', fontSize: '24px', fontWeight: '700' }}>
-            🧀 Pinduoduo Tracker
-          </h1>
-          <p style={{ fontSize: '12px', color: '#8c7a6b', marginBottom: '25px', lineHeight: '1.5' }}>
-            Sign in with your Google account to access your private orders and real-time cloud sync! ✨
-          </p>
-          <button
-            onClick={handleLogin}
-            style={{
-              ...getButtonStyle('primary'),
-              width: '100%',
-              padding: '12px',
-              fontSize: '14px',
-              justifyContent: 'center'
-            }}
-          >
-            Sign in with Google ✨
-          </button>
+        <div style={{ position: 'relative', width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          
+          <div style={{ marginBottom: '-14px', zIndex: 2, width: '220px', display: 'flex', justifyContent: 'center' }}>
+            <img 
+              src={PEEKING_CATS_URL} 
+              alt="Peeking Cats" 
+              style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
+            />
+          </div>
+
+          <div style={{
+            background: '#fffdfa',
+            padding: '35px 30px 30px 30px',
+            borderRadius: '20px',
+            boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)',
+            borderTop: '6px solid #ffd166',
+            border: '1px solid #e6ccb2',
+            width: '100%',
+            textAlign: 'center',
+            boxSizing: 'border-box'
+          }}>
+            <h1 style={{ margin: '0 0 10px 0', color: '#7f5539', fontSize: '24px', fontWeight: '700' }}>
+              🧀 Pinduoduo Tracker
+            </h1>
+            <p style={{ fontSize: '12px', color: '#8c7a6b', marginBottom: '25px', lineHeight: '1.5' }}>
+              Sign in with your Google account to access your private order tracker and real-time cloud syncing! ✨
+            </p>
+            <button
+              onClick={handleLogin}
+              style={{
+                ...getButtonStyle('primary'),
+                width: '100%',
+                padding: '12px',
+                fontSize: '14px',
+                justifyContent: 'center'
+              }}
+            >
+              Sign in with Google ✨
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // --- DATA LOADING SCREEN ---
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#fdfbf7', color: '#7f5539', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
@@ -679,21 +665,22 @@ export default function App() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px', width: '100%' }}>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <h1 style={{ margin: 0, color: '#7f5539', fontSize: '22px', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '700' }}>
+            <h1 
+              onClick={() => {
+                setActiveTab('orders');
+                setSelectedBatch('All Batches');
+                setSearchQuery('');
+                setOrdersPage(1);
+              }}
+              style={{ margin: 0, color: '#7f5539', fontSize: '22px', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '700', cursor: 'pointer' }}
+              title="Click to go to Home / General Orders"
+            >
               🧀 Pinduoduo Tracker
             </h1>
-            <button
-              onClick={handleLogout}
-              style={getButtonStyle('light')}
-              title={`Logged in as ${user.email}`}
-            >
-              Sign Out ({user.displayName || user.email}) 🚪
-            </button>
           </div>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             
-            {/* Global Proactive Search Bar */}
             <div style={{ position: 'relative' }}>
               <div style={{ display: 'flex', alignItems: 'center', background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '9999px', padding: '6px 14px', width: '250px', boxSizing: 'border-box', boxShadow: '0 2px 0 rgba(199, 175, 150, 0.2)' }}>
                 <span style={{ marginRight: '8px', fontSize: '12px', color: '#7f5539' }}>🔍</span>
@@ -754,10 +741,92 @@ export default function App() {
             >
               {activeTab === 'wishlist' ? 'Add Wishlist Item' : 'Add Order'}
             </button>
+
+            {/* STRAWBERRY CAT ACCOUNT / SIGNOUT POPUP BUTTON */}
+            <div style={{ position: 'relative' }} ref={accountMenuRef}>
+              <button
+                onClick={() => setIsAccountMenuOpen(prev => !prev)}
+                style={{
+                  background: '#f2e8cf',
+                  border: '1.5px solid #ffd166',
+                  borderRadius: '50%',
+                  width: '36px',
+                  height: '36px',
+                  padding: 0,
+                  cursor: 'pointer',
+                  boxShadow: '0 3px 0 rgba(199, 175, 150, 0.4)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                  outline: 'none'
+                }}
+                title="Account & Sign Out"
+              >
+                <img 
+                  src={STRAWBERRY_CAT_URL} 
+                  alt="Strawberry Cat" 
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              </button>
+
+              {isAccountMenuOpen && (
+                <div style={{
+                  position: 'absolute',
+                  top: '120%',
+                  right: 0,
+                  width: '280px',
+                  background: '#fffdfa',
+                  border: '1px solid #e6ccb2',
+                  borderRadius: '16px',
+                  boxShadow: '0 10px 30px rgba(230, 204, 178, 0.5)',
+                  zIndex: 300,
+                  padding: '16px',
+                  boxSizing: 'border-box',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '14px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #fcf6f0', paddingBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #ffd166' }}>
+                        <img src={STRAWBERRY_CAT_URL} alt="Strawberry Cat" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#5c4033', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {user.displayName || 'Pinduoduo User'}
+                        </span>
+                        <span style={{ fontSize: '10px', color: '#8c7a6b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {user.email}
+                        </span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setIsAccountMenuOpen(false)}
+                      style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '24px', height: '24px', fontSize: '10px', cursor: 'pointer', color: '#7f5539', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleLogout}
+                    style={{
+                      ...getButtonStyle('pink'),
+                      width: '100%',
+                      justifyContent: 'center',
+                      padding: '10px'
+                    }}
+                  >
+                    Sign Out 🚪
+                  </button>
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
 
-        {/* TAB SWITCHER & BATCH DROPDOWN */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px', background: '#fcf6f0', padding: '12px 18px', borderRadius: '12px', border: '1px solid #e6ccb2', width: '100%', boxSizing: 'border-box' }}>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button
@@ -852,7 +921,6 @@ export default function App() {
       {activeTab === 'orders' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', boxSizing: 'border-box' }}>
           
-          {/* AT A GLANCE DASHBOARD BOX */}
           <div style={{ background: '#fffdfa', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', border: '1px solid #f0e6df', boxSizing: 'border-box', width: '100%' }}>
             <div style={{ background: '#fcf6f0', borderRadius: '12px', padding: '15px', border: '1px solid #e6ccb2', width: '100%', boxSizing: 'border-box' }}>
               <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: '#7f5539', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
@@ -883,7 +951,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* GENERAL ORDERS TABLE */}
           <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', marginBottom: '25px', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
@@ -1007,7 +1074,6 @@ export default function App() {
       {activeTab === 'wishlist' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', boxSizing: 'border-box' }}>
           
-          {/* WISHLIST DASHBOARD BOX */}
           <div style={{ background: '#fffdfa', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', border: '1px solid #f0e6df', boxSizing: 'border-box', width: '100%' }}>
             <div style={{ background: '#fcf6f0', borderRadius: '12px', padding: '15px', border: '1px solid #e6ccb2', width: '100%', boxSizing: 'border-box' }}>
               <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: '#7f5539', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
@@ -1034,7 +1100,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* WISHLIST TABLE CONTAINER */}
           <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
@@ -1118,7 +1183,7 @@ export default function App() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.4)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
           <div style={{ background: '#fffdfa', borderRadius: '20px', padding: '25px', maxWidth: '650px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 15px 40px rgba(230, 204, 178, 0.5)', borderTop: '6px solid #ffd166', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '12px', position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '12px' }}>
               <div style={{ width: '32px' }}></div>
               <h2 style={{ fontSize: '18px', margin: 0, color: '#7f5539', fontWeight: '700', textAlign: 'center', flex: 1 }}>
                 Pinduoduo Shipping Adventure Guide
@@ -1136,7 +1201,6 @@ export default function App() {
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              
               {[
                 { title: 'Ordered', statusKey: 'Ordered', desc: 'Your order is placed and awaiting consolidation at the warehouse.', isStep: true },
                 { title: 'At China Warehouse', statusKey: 'At China Warehouse', desc: 'Package arrived at the China consolidation hub and is getting prepped.', isStep: true },
@@ -1185,7 +1249,6 @@ export default function App() {
                   </div>
                 );
               })}
-
             </div>
 
             <div style={{ marginTop: '20px', textAlign: 'center' }}>
@@ -1363,38 +1426,6 @@ export default function App() {
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Latest Cost (Unit ₱)</label>
                   <input type="number" step="0.01" name="latestCost" value={wishlistFormData.latestCost} onChange={handleWishlistInputChange} placeholder="Leave empty if same" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
                 </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', background: '#fcf6f0', padding: '10px', borderRadius: '8px', border: '1px solid #e6ccb2' }}>
-                <div>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>INITIAL TOTAL COST</span>
-                  <strong style={{ fontSize: '13px', color: '#5c4033' }}>
-                    ₱{((Number(wishlistFormData.qty) || 1) * (Number(wishlistFormData.initialCost) || 0)).toFixed(2)}
-                  </strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>LATEST TOTAL COST</span>
-                  <strong style={{ fontSize: '13px', color: '#bc6c25' }}>
-                    ₱{((Number(wishlistFormData.qty) || 1) * (wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : (Number(wishlistFormData.initialCost) || 0))).toFixed(2)}
-                  </strong>
-                </div>
-              </div>
-
-              <div style={{ background: '#fcf6f0', padding: '10px', borderRadius: '8px', border: '1px solid #e6ccb2', textAlign: 'center' }}>
-                <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', marginBottom: '3px', fontWeight: '700' }}>PRICE FLAG PREVIEW</span>
-                {renderPriceFlag(
-                  Number(wishlistFormData.qty) || 1,
-                  Number(wishlistFormData.initialCost) || 0,
-                  wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : (Number(wishlistFormData.initialCost) || 0)
-                )}
-                {Number(wishlistFormData.qty) > 1 && (
-                  <span style={{ display: 'block', fontSize: '10px', color: '#8c7a6b', marginTop: '4px' }}>
-                    (Unit savings: ₱{(
-                      (Number(wishlistFormData.initialCost) || 0) - 
-                      (wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : (Number(wishlistFormData.initialCost) || 0))
-                    ).toFixed(2)} × {wishlistFormData.qty} pcs)
-                  </span>
-                )}
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
