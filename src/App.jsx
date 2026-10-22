@@ -1,24 +1,44 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
+
+// --- FIREBASE CONFIGURATION ---
+const firebaseConfig = {
+  apiKey: "AIzaSyAuh6azovHpGjBKSp0vbeWpWfWK1tYn3qg",
+  authDomain: "pinduoduo-tracker.firebaseapp.com",
+  projectId: "pinduoduo-tracker",
+  storageBucket: "pinduoduo-tracker.firebasestorage.app",
+  messagingSenderId: "612068892124",
+  appId: "1:612068892124:web:fe0fb3735f397d52330319"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 export default function App() {
-  // 1. STATE WITH LOCAL STORAGE PERSISTENCE
-  const [orders, setOrders] = useState(() => {
-    const saved = localStorage.getItem('pdd_orders');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // 1. STATE WITH REAL-TIME CLOUD SYNC
+  const [orders, setOrders] = useState([]);
+  const [wishlist, setWishlist] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const [wishlist, setWishlist] = useState(() => {
-    const saved = localStorage.getItem('pdd_wishlist');
-    return saved ? JSON.parse(saved) : [];
-  });
-
+  // Real-time listener for Orders & Wishlist from Firestore
   useEffect(() => {
-    localStorage.setItem('pdd_orders', JSON.stringify(orders));
-  }, [orders]);
+    const unsubOrders = onSnapshot(collection(db, "pdd_orders"), (snapshot) => {
+      const ordersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setOrders(ordersData);
+    });
 
-  useEffect(() => {
-    localStorage.setItem('pdd_wishlist', JSON.stringify(wishlist));
-  }, [wishlist]);
+    const unsubWishlist = onSnapshot(collection(db, "pdd_wishlist"), (snapshot) => {
+      const wishlistData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setWishlist(wishlistData);
+      setLoading(false);
+    });
+
+    return () => {
+      unsubOrders();
+      unsubWishlist();
+    };
+  }, []);
 
   // NAVIGATION TAB STATE ("orders" or "wishlist")
   const [activeTab, setActiveTab] = useState('orders');
@@ -281,52 +301,41 @@ export default function App() {
     setIsOrderModalOpen(true);
   };
 
-  const handleDeleteOrder = (id) => {
+  const handleDeleteOrder = async (id) => {
     if (window.confirm('Are you sure you want to delete this order?')) {
-      setOrders(orders.filter(o => o.id !== id));
+      try {
+        await deleteDoc(doc(db, "pdd_orders", String(id)));
+      } catch (error) {
+        console.error("Error deleting order: ", error);
+      }
     }
   };
 
-  const handleSaveOrder = (e) => {
+  const handleSaveOrder = async (e) => {
     e.preventDefault();
     if (!orderFormData.name || !orderFormData.cost) {
       alert('Please enter at least an Item Name and Cost!');
       return;
     }
 
-    if (editingOrder) {
-      setOrders(orders.map(o => 
-        o.id === editingOrder.id
-          ? {
-              ...o,
-              name: orderFormData.name,
-              qty: Number(orderFormData.qty),
-              cost: Number(orderFormData.cost),
-              date: orderFormData.date,
-              batch: orderFormData.batch,
-              shippingStatus: orderFormData.shippingStatus,
-              orderStatus: orderFormData.orderStatus,
-              notes: orderFormData.notes,
-              actualDeliveryDate: orderFormData.actualDeliveryDate,
-              estDelivery: calculateEstDelivery(orderFormData.date)
-            }
-          : o
-      ));
-    } else {
-      const newOrder = {
-        id: Date.now(),
-        name: orderFormData.name,
-        qty: Number(orderFormData.qty),
-        cost: Number(orderFormData.cost),
-        date: orderFormData.date,
-        batch: orderFormData.batch,
-        shippingStatus: orderFormData.shippingStatus,
-        orderStatus: orderFormData.orderStatus,
-        notes: orderFormData.notes,
-        actualDeliveryDate: orderFormData.actualDeliveryDate,
-        estDelivery: calculateEstDelivery(orderFormData.date)
-      };
-      setOrders([newOrder, ...orders]);
+    const orderId = editingOrder ? String(editingOrder.id) : String(Date.now());
+    const orderPayload = {
+      name: orderFormData.name,
+      qty: Number(orderFormData.qty),
+      cost: Number(orderFormData.cost),
+      date: orderFormData.date,
+      batch: orderFormData.batch,
+      shippingStatus: orderFormData.shippingStatus,
+      orderStatus: orderFormData.orderStatus,
+      notes: orderFormData.notes,
+      actualDeliveryDate: orderFormData.actualDeliveryDate,
+      estDelivery: calculateEstDelivery(orderFormData.date)
+    };
+
+    try {
+      await setDoc(doc(db, "pdd_orders", orderId), orderPayload);
+    } catch (error) {
+      console.error("Error saving order: ", error);
     }
 
     setIsOrderModalOpen(false);
@@ -350,13 +359,17 @@ export default function App() {
     setIsWishlistModalOpen(true);
   };
 
-  const handleDeleteWishlist = (id) => {
+  const handleDeleteWishlist = async (id) => {
     if (window.confirm('Are you sure you want to delete this item from your wishlist?')) {
-      setWishlist(wishlist.filter(item => item.id !== id));
+      try {
+        await deleteDoc(doc(db, "pdd_wishlist", String(id)));
+      } catch (error) {
+        console.error("Error deleting wishlist item: ", error);
+      }
     }
   };
 
-  const handleSaveWishlist = (e) => {
+  const handleSaveWishlist = async (e) => {
     e.preventDefault();
     if (!wishlistFormData.name || !wishlistFormData.initialCost) {
       alert('Please enter at least an Item Name and Initial Cost!');
@@ -365,37 +378,34 @@ export default function App() {
 
     const initial = Number(wishlistFormData.initialCost);
     const latest = wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : initial;
+    const itemId = editingWishlistItem ? String(editingWishlistItem.id) : String(Date.now());
 
-    if (editingWishlistItem) {
-      setWishlist(wishlist.map(item => 
-        item.id === editingWishlistItem.id 
-          ? { ...item, name: wishlistFormData.name, qty: Number(wishlistFormData.qty), initialCost: initial, latestCost: latest }
-          : item
-      ));
-    } else {
-      const newItem = {
-        id: Date.now(),
-        name: wishlistFormData.name,
-        qty: Number(wishlistFormData.qty),
-        initialCost: initial,
-        latestCost: latest
-      };
-      setWishlist([newItem, ...wishlist]);
+    const wishlistPayload = {
+      name: wishlistFormData.name,
+      qty: Number(wishlistFormData.qty),
+      initialCost: initial,
+      latestCost: latest
+    };
+
+    try {
+      await setDoc(doc(db, "pdd_wishlist", itemId), wishlistPayload);
+    } catch (error) {
+      console.error("Error saving wishlist item: ", error);
     }
 
     setIsWishlistModalOpen(false);
     setEditingWishlistItem(null);
   };
 
-  const handleMoveToTracker = (itemToMove) => {
+  const handleMoveToTracker = async (itemToMove) => {
     const today = new Date().toISOString().split('T')[0];
+    const newOrderId = String(Date.now());
     const newOrder = {
-      id: Date.now(),
       name: itemToMove.name,
       qty: itemToMove.qty,
       cost: itemToMove.latestCost || itemToMove.initialCost,
       date: today,
-      batch: '',
+      batch: 'Batch 1',
       shippingStatus: 'Ordered',
       orderStatus: '',
       notes: 'Transferred from Wishlist',
@@ -403,9 +413,13 @@ export default function App() {
       estDelivery: calculateEstDelivery(today)
     };
 
-    setOrders([newOrder, ...orders]);
-    setWishlist(wishlist.filter(item => item.id !== itemToMove.id));
-    setActiveTab('orders');
+    try {
+      await setDoc(doc(db, "pdd_orders", newOrderId), newOrder);
+      await deleteDoc(doc(db, "pdd_wishlist", String(itemToMove.id)));
+      setActiveTab('orders');
+    } catch (error) {
+      console.error("Error moving item to tracker: ", error);
+    }
   };
 
   // GLOBAL PROACTIVE SEARCH & FILTER COMPUTATIONS
@@ -531,6 +545,14 @@ export default function App() {
       </div>
     );
   };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#fdfbf7', color: '#7f5539', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
+        🧀 Connecting to Cloud Sync... ✨
+      </div>
+    );
+  }
 
   return (
     <div style={{ 
