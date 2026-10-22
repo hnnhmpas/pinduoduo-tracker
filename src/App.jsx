@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
@@ -14,21 +15,62 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
 
 export default function App() {
-  // 1. STATE WITH REAL-TIME CLOUD SYNC
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // AUTHENTICATION STATE LISTENER
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error("Error signing in: ", error);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Error signing out: ", error);
+    }
+  };
+
+  // 1. STATE WITH REAL-TIME CLOUD SYNC & PRIVATE USER PATHS
   const [orders, setOrders] = useState([]);
   const [wishlist, setWishlist] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Real-time listener for Orders & Wishlist from Firestore
   useEffect(() => {
-    const unsubOrders = onSnapshot(collection(db, "pdd_orders"), (snapshot) => {
+    if (!user) {
+      setOrders([]);
+      setWishlist([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    // Private user sub-collections: users/{userId}/pdd_orders and users/{userId}/pdd_wishlist
+    const ordersColRef = collection(db, "users", user.uid, "pdd_orders");
+    const wishlistColRef = collection(db, "users", user.uid, "pdd_wishlist");
+
+    const unsubOrders = onSnapshot(ordersColRef, (snapshot) => {
       const ordersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setOrders(ordersData);
     });
 
-    const unsubWishlist = onSnapshot(collection(db, "pdd_wishlist"), (snapshot) => {
+    const unsubWishlist = onSnapshot(wishlistColRef, (snapshot) => {
       const wishlistData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setWishlist(wishlistData);
       setLoading(false);
@@ -38,7 +80,7 @@ export default function App() {
       unsubOrders();
       unsubWishlist();
     };
-  }, []);
+  }, [user]);
 
   // NAVIGATION TAB STATE ("orders" or "wishlist")
   const [activeTab, setActiveTab] = useState('orders');
@@ -304,7 +346,7 @@ export default function App() {
   const handleDeleteOrder = async (id) => {
     if (window.confirm('Are you sure you want to delete this order?')) {
       try {
-        await deleteDoc(doc(db, "pdd_orders", String(id)));
+        await deleteDoc(doc(db, "users", user.uid, "pdd_orders", String(id)));
       } catch (error) {
         console.error("Error deleting order: ", error);
       }
@@ -333,7 +375,7 @@ export default function App() {
     };
 
     try {
-      await setDoc(doc(db, "pdd_orders", orderId), orderPayload);
+      await setDoc(doc(db, "users", user.uid, "pdd_orders", orderId), orderPayload);
     } catch (error) {
       console.error("Error saving order: ", error);
     }
@@ -362,7 +404,7 @@ export default function App() {
   const handleDeleteWishlist = async (id) => {
     if (window.confirm('Are you sure you want to delete this item from your wishlist?')) {
       try {
-        await deleteDoc(doc(db, "pdd_wishlist", String(id)));
+        await deleteDoc(doc(db, "users", user.uid, "pdd_wishlist", String(id)));
       } catch (error) {
         console.error("Error deleting wishlist item: ", error);
       }
@@ -388,7 +430,7 @@ export default function App() {
     };
 
     try {
-      await setDoc(doc(db, "pdd_wishlist", itemId), wishlistPayload);
+      await setDoc(doc(db, "users", user.uid, "pdd_wishlist", itemId), wishlistPayload);
     } catch (error) {
       console.error("Error saving wishlist item: ", error);
     }
@@ -414,8 +456,8 @@ export default function App() {
     };
 
     try {
-      await setDoc(doc(db, "pdd_orders", newOrderId), newOrder);
-      await deleteDoc(doc(db, "pdd_wishlist", String(itemToMove.id)));
+      await setDoc(doc(db, "users", user.uid, "pdd_orders", newOrderId), newOrder);
+      await deleteDoc(doc(db, "users", user.uid, "pdd_wishlist", String(itemToMove.id)));
       setActiveTab('orders');
     } catch (error) {
       console.error("Error moving item to tracker: ", error);
@@ -546,6 +588,68 @@ export default function App() {
     );
   };
 
+  // --- AUTH CHECK LOADING SCREEN ---
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#fdfbf7', color: '#7f5539', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
+        🧀 Loading your cozy space... ✨
+      </div>
+    );
+  }
+
+  // --- COZY LOGIN SCREEN ---
+  if (!user) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        width: '100vw',
+        background: '#fdfbf7',
+        fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+        boxSizing: 'border-box',
+        padding: '20px',
+        position: 'absolute',
+        top: 0,
+        left: 0
+      }}>
+        <div style={{
+          background: '#fffdfa',
+          padding: '35px',
+          borderRadius: '20px',
+          boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)',
+          borderTop: '6px solid #ffd166',
+          border: '1px solid #e6ccb2',
+          maxWidth: '400px',
+          width: '100%',
+          textAlign: 'center',
+          boxSizing: 'border-box'
+        }}>
+          <h1 style={{ margin: '0 0 10px 0', color: '#7f5539', fontSize: '24px', fontWeight: '700' }}>
+            🧀 Pinduoduo Tracker
+          </h1>
+          <p style={{ fontSize: '12px', color: '#8c7a6b', marginBottom: '25px', lineHeight: '1.5' }}>
+            Sign in with your Google account to access your private orders and real-time cloud sync! ✨
+          </p>
+          <button
+            onClick={handleLogin}
+            style={{
+              ...getButtonStyle('primary'),
+              width: '100%',
+              padding: '12px',
+              fontSize: '14px',
+              justifyContent: 'center'
+            }}
+          >
+            Sign in with Google ✨
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- DATA LOADING SCREEN ---
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#fdfbf7', color: '#7f5539', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
@@ -574,9 +678,18 @@ export default function App() {
       <header style={{ display: 'flex', flexDirection: 'column', gap: '15px', background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.35)', marginBottom: '22px', borderTop: '4px solid #ffd166', width: '100%', boxSizing: 'border-box', border: '1px solid #f0e6df' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px', width: '100%' }}>
           
-          <h1 style={{ margin: 0, color: '#7f5539', fontSize: '22px', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '700' }}>
-            🧀 Pinduoduo Tracker
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+            <h1 style={{ margin: 0, color: '#7f5539', fontSize: '22px', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '700' }}>
+              🧀 Pinduoduo Tracker
+            </h1>
+            <button
+              onClick={handleLogout}
+              style={getButtonStyle('light')}
+              title={`Logged in as ${user.email}`}
+            >
+              Sign Out ({user.displayName || user.email}) 🚪
+            </button>
+          </div>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             
