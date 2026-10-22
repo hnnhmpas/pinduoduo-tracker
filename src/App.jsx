@@ -1432,7 +1432,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* LIVE COMPUTATION PREVIEW BOX */}
+              {/* LIVE COMPUTATION PREVIEW BOX (FOR BOTH ADD & EDIT) */}
               {wishlistFormData.initialCost !== '' && !isNaN(Number(wishlistFormData.initialCost)) && (
                 <div style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#7f5539' }}>
@@ -1464,5 +1464,3 @@ export default function App() {
     </div>
   );
 }
-
-//
