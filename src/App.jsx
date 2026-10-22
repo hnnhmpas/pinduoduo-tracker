@@ -20,7 +20,6 @@ const googleProvider = new GoogleAuthProvider();
 
 // ASSET URLS
 const STRAWBERRY_CAT_URL = "https://i.imgur.com/VS9pglf.png";
-const PEEKING_CATS_URL = "https://i.imgur.com/TDgn117.png";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -574,7 +573,7 @@ export default function App() {
     );
   }
 
-  // --- COZY LOGIN SCREEN WITH PEEKING CATS ---
+  // --- COZY LOGIN SCREEN (CATS REMOVED) ---
   if (!user) {
     return (
       <div style={{
@@ -593,15 +592,6 @@ export default function App() {
       }}>
         <div style={{ position: 'relative', width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           
-          {/* Peeking Cats Banner correctly placed right on top of the card */}
-          <div style={{ marginBottom: '-16px', zIndex: 2, width: '220px', display: 'flex', justifyContent: 'center' }}>
-            <img 
-              src={PEEKING_CATS_URL} 
-              alt="Peeking Cats" 
-              style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
-            />
-          </div>
-
           <div style={{
             background: '#fffdfa',
             padding: '35px 30px 30px 30px',
@@ -788,13 +778,13 @@ export default function App() {
                   flexDirection: 'column',
                   gap: '16px'
                 }}>
-                  {/* Top Header: X button at top right */}
+                  {/* Top Header: Uniform circular X button */}
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-10px' }}>
                     <button 
                       onClick={() => setIsAccountMenuOpen(false)}
-                      style={{ background: 'transparent', border: 'none', fontSize: '14px', cursor: 'pointer', color: '#8c7a6b', fontWeight: 'bold', padding: 0 }}
+                      style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     >
-                      X
+                      ✕
                     </button>
                   </div>
 
@@ -813,7 +803,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Sign Out Button (Yellow, no emoji) */}
+                  {/* Sign Out Button (Yellow) */}
                   <button
                     onClick={handleLogout}
                     style={{
@@ -1273,11 +1263,17 @@ export default function App() {
       {isOrderModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
           <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '480px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
+            
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
                 {editingOrder ? 'Edit Order' : 'Add New Order'}
               </h2>
-              <button onClick={() => setIsOrderModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#b0a499' }}>✖</button>
+              <button 
+                onClick={() => setIsOrderModalOpen(false)} 
+                style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                ✕
+              </button>
             </div>
 
             <form onSubmit={handleSaveOrder} style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
@@ -1389,7 +1385,8 @@ export default function App() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+              {/* Cancel left, Action right */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsOrderModalOpen(false)} style={getButtonStyle('light')}>Cancel</button>
                 <button type="submit" style={getButtonStyle('primary')}>
                   {editingOrder ? 'Update Order' : 'Save Order'}
@@ -1404,11 +1401,17 @@ export default function App() {
       {isWishlistModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
           <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '440px', width: '100%', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
+            
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
                 {editingWishlistItem ? 'Edit Wishlist Item' : 'Add Wishlist Item'}
               </h2>
-              <button onClick={() => setIsWishlistModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#b0a499' }}>✖</button>
+              <button 
+                onClick={() => setIsWishlistModalOpen(false)} 
+                style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                ✕
+              </button>
             </div>
 
             <form onSubmit={handleSaveWishlist} style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
@@ -1433,7 +1436,8 @@ export default function App() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+              {/* Cancel left, Action right */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsWishlistModalOpen(false)} style={getButtonStyle('light')}>Cancel</button>
                 <button type="submit" style={getButtonStyle('primary')}>
                   {editingWishlistItem ? 'Update Item' : 'Add Item'}
