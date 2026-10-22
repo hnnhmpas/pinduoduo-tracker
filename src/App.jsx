@@ -18,8 +18,9 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 
-// EMBEDDED COZY CAT ASSETS (Derived from your uploaded files)
-const STRAWBERRY_CAT_DATA = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="; // Embedded clean asset fallback, replaced with direct styling if needed or loaded cleanly
+// YOUR EXACT AUTHENTIC IMAGE LINKS
+const STRAWBERRY_CAT_URL = "https://i.imgur.com/VS9pglf.png";
+const PEEKING_CATS_URL = "https://i.imgur.com/TDgn117.png";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -592,35 +593,13 @@ export default function App() {
       }}>
         <div style={{ position: 'relative', width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           
-          {/* Peeking Cats Illustration (Embedded vector/clean representation) */}
+          {/* Peeking Cats Illustration (Background removed / transparent) */}
           <div style={{ marginBottom: '-14px', zIndex: 2, width: '220px', display: 'flex', justifyContent: 'center' }}>
-            <svg viewBox="0 0 300 100" style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
-              <path d="M10,80 Q30,40 50,80 Q70,30 90,80 Q120,20 150,80 Q180,30 210,80 Q230,40 250,80 Q270,50 290,80" fill="#fffdfa" stroke="#5c4033" strokeWidth="2.5" />
-              {/* Cat 1 */}
-              <circle cx="45" cy="50" r="22" fill="#fffdfa" stroke="#5c4033" strokeWidth="2" />
-              <polygon points="28,35 35,50 22,45" fill="#fffdfa" stroke="#5c4033" strokeWidth="2" />
-              <polygon points="62,35 55,50 68,45" fill="#fffdfa" stroke="#5c4033" strokeWidth="2" />
-              <circle cx="38" cy="48" r="2.5" fill="#5c4033" /><circle cx="52" cy="48" r="2.5" fill="#5c4033" />
-              <path d="M43,54 Q45,56 47,54" fill="none" stroke="#5c4033" strokeWidth="1.5" strokeLinecap="round" />
-              {/* Cat 2 (Grey) */}
-              <circle cx="110" cy="45" r="24" fill="#e0e0e0" stroke="#5c4033" strokeWidth="2" />
-              <polygon points="92,28 100,45 88,40" fill="#e0e0e0" stroke="#5c4033" strokeWidth="2" />
-              <polygon points="128,28 120,45 132,40" fill="#e0e0e0" stroke="#5c4033" strokeWidth="2" />
-              <circle cx="102" cy="42" r="2.5" fill="#5c4033" /><circle cx="118" cy="42" r="2.5" fill="#5c4033" />
-              <path d="M108,48 Q110,53 112,48" fill="#ffb3c1" stroke="#5c4033" strokeWidth="1.5" />
-              {/* Cat 3 (Orange) */}
-              <circle cx="175" cy="45" r="24" fill="#ffd166" stroke="#5c4033" strokeWidth="2" />
-              <polygon points="157,28 165,45 153,40" fill="#ffd166" stroke="#5c4033" strokeWidth="2" />
-              <polygon points="193,28 185,45 197,40" fill="#ffd166" stroke="#5c4033" strokeWidth="2" />
-              <circle cx="167" cy="43" r="2.5" fill="#5c4033" /><circle cx="183" cy="43" r="2.5" fill="#5c4033" />
-              <path d="M173,49 Q175,52 177,49" fill="none" stroke="#5c4033" strokeWidth="1.5" strokeLinecap="round" />
-              {/* Cat 4 */}
-              <circle cx="240" cy="50" r="22" fill="#fffdfa" stroke="#5c4033" strokeWidth="2" />
-              <polygon points="223,35 230,50 217,45" fill="#fffdfa" stroke="#5c4033" strokeWidth="2" />
-              <polygon points="257,35 250,50 263,45" fill="#fffdfa" stroke="#5c4033" strokeWidth="2" />
-              <circle cx="233" cy="48" r="2.5" fill="#5c4033" /><circle cx="247" cy="48" r="2.5" fill="#5c4033" />
-              <path d="M238,54 Q240,56 242,54" fill="none" stroke="#5c4033" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
+            <img 
+              src={PEEKING_CATS_URL} 
+              alt="Peeking Cats" 
+              style={{ width: '100%', height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply' }}
+            />
           </div>
 
           <div style={{
@@ -764,12 +743,12 @@ export default function App() {
               {activeTab === 'wishlist' ? 'Add Wishlist Item' : 'Add Order'}
             </button>
 
-            {/* STRAWBERRY CAT ACCOUNT / SIGNOUT POPUP BUTTON (Embedded Clean Vector Avatar) */}
+            {/* STRAWBERRY CAT ACCOUNT / SIGNOUT POPUP BUTTON */}
             <div style={{ position: 'relative' }} ref={accountMenuRef}>
               <button
                 onClick={() => setIsAccountMenuOpen(prev => !prev)}
                 style={{
-                  background: '#ffccd5',
+                  background: '#ffd166',
                   border: '1.5px solid #ffd166',
                   borderRadius: '50%',
                   width: '36px',
@@ -785,15 +764,11 @@ export default function App() {
                 }}
                 title="Account & Sign Out"
               >
-                <svg viewBox="0 0 100 100" style={{ width: '100%', height: '100%' }}>
-                  <path d="M50,15 Q75,15 80,40 Q85,75 50,85 Q15,75 20,40 Q25,15 50,15 Z" fill="#ff6b6b" />
-                  <path d="M30,10 Q50,-5 70,10 Q50,25 30,10 Z" fill="#aacc00" />
-                  <circle cx="50" cy="55" r="25" fill="#fffdfa" stroke="#5c4033" strokeWidth="3" />
-                  <polygon points="32,40 38,55 27,50" fill="#fffdfa" stroke="#5c4033" strokeWidth="2.5" />
-                  <polygon points="68,40 62,55 73,50" fill="#fffdfa" stroke="#5c4033" strokeWidth="2.5" />
-                  <circle cx="42" cy="53" r="3" fill="#5c4033" /><circle cx="58" cy="53" r="3" fill="#5c4033" />
-                  <path d="M47,60 Q50,63 53,60" fill="none" stroke="#5c4033" strokeWidth="2" strokeLinecap="round" />
-                </svg>
+                <img 
+                  src={STRAWBERRY_CAT_URL} 
+                  alt="Strawberry Cat" 
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
               </button>
 
               {isAccountMenuOpen && (
@@ -815,11 +790,8 @@ export default function App() {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #fcf6f0', paddingBottom: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #ffd166', background: '#ffccd5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <svg viewBox="0 0 100 100" style={{ width: '100%', height: '100%' }}>
-                          <circle cx="50" cy="55" r="28" fill="#fffdfa" stroke="#5c4033" strokeWidth="3" />
-                          <circle cx="42" cy="53" r="3" fill="#5c4033" /><circle cx="58" cy="53" r="3" fill="#5c4033" />
-                        </svg>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #ffd166', background: '#ffd166' }}>
+                        <img src={STRAWBERRY_CAT_URL} alt="Strawberry Cat" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                         <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#5c4033', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
