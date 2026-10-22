@@ -18,7 +18,7 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 
-// YOUR EXACT AUTHENTIC IMAGE LINKS
+// ASSET URLS
 const STRAWBERRY_CAT_URL = "https://i.imgur.com/VS9pglf.png";
 const PEEKING_CATS_URL = "https://i.imgur.com/TDgn117.png";
 
@@ -593,12 +593,12 @@ export default function App() {
       }}>
         <div style={{ position: 'relative', width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           
-          {/* Peeking Cats Illustration (Background removed / transparent) */}
-          <div style={{ marginBottom: '-14px', zIndex: 2, width: '220px', display: 'flex', justifyContent: 'center' }}>
+          {/* Peeking Cats Banner correctly placed right on top of the card */}
+          <div style={{ marginBottom: '-16px', zIndex: 2, width: '220px', display: 'flex', justifyContent: 'center' }}>
             <img 
               src={PEEKING_CATS_URL} 
               alt="Peeking Cats" 
-              style={{ width: '100%', height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply' }}
+              style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
             />
           </div>
 
@@ -776,50 +776,55 @@ export default function App() {
                   position: 'absolute',
                   top: '120%',
                   right: 0,
-                  width: '280px',
+                  width: '300px',
                   background: '#fffdfa',
                   border: '1px solid #e6ccb2',
                   borderRadius: '16px',
                   boxShadow: '0 10px 30px rgba(230, 204, 178, 0.5)',
                   zIndex: 300,
-                  padding: '16px',
+                  padding: '18px',
                   boxSizing: 'border-box',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '14px'
+                  gap: '16px'
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #fcf6f0', paddingBottom: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #ffd166', background: '#ffd166' }}>
-                        <img src={STRAWBERRY_CAT_URL} alt="Strawberry Cat" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                        <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#5c4033', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {user.displayName || 'Pinduoduo User'}
-                        </span>
-                        <span style={{ fontSize: '10px', color: '#8c7a6b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {user.email}
-                        </span>
-                      </div>
-                    </div>
+                  {/* Top Header: X button at top right */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-10px' }}>
                     <button 
                       onClick={() => setIsAccountMenuOpen(false)}
-                      style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '24px', height: '24px', fontSize: '10px', cursor: 'pointer', color: '#7f5539', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      style={{ background: 'transparent', border: 'none', fontSize: '14px', cursor: 'pointer', color: '#8c7a6b', fontWeight: 'bold', padding: 0 }}
                     >
-                      ✕
+                      X
                     </button>
                   </div>
 
+                  {/* Profile Info: Avatar on left, Name & Email on left */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <div style={{ width: '50px', height: '50px', borderRadius: '50%', overflow: 'hidden', border: '1.5px solid #ffd166', background: '#ffd166', flexShrink: '0' }}>
+                      <img src={STRAWBERRY_CAT_URL} alt="Strawberry Cat" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', textAlign: 'left', gap: '2px' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#5c4033', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {user.displayName || 'Pinduoduo User'}
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#8c7a6b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {user.email}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Sign Out Button (Yellow, no emoji) */}
                   <button
                     onClick={handleLogout}
                     style={{
-                      ...getButtonStyle('pink'),
+                      ...getButtonStyle('primary'),
                       width: '100%',
                       justifyContent: 'center',
-                      padding: '10px'
+                      padding: '10px',
+                      fontSize: '13px'
                     }}
                   >
-                    Sign Out 🚪
+                    Sign Out
                   </button>
                 </div>
               )}
@@ -853,7 +858,6 @@ export default function App() {
                   onClick={() => setIsBatchDropdownOpen(prev => !prev)}
                   style={getButtonStyle('light')}
                 >
-                  <span style={{ background: '#ffd166', color: '#5c4033', padding: '2px 6px', borderRadius: '10px', fontSize: '10px' }}>🏷️</span>
                   {selectedBatch}
                   <span style={{ fontSize: '10px', color: '#8c7a6b', marginLeft: '4px' }}>{isBatchDropdownOpen ? '▲' : '▼'}</span>
                 </button>
