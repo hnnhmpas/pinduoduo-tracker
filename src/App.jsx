@@ -98,6 +98,14 @@ export default function App() {
   const [modalShippingOpen, setModalShippingOpen] = useState(false);
   const [modalOrderStatusOpen, setModalOrderStatusOpen] = useState(false);
 
+  // BATCH EDIT MODAL / DROPDOWN STATES FOR SELECTED ORDERS
+  const [selectedOrderIds, setSelectedOrderIds] = useState([]);
+  const [isBatchEditOpen, setIsBatchEditOpen] = useState(false);
+  const [batchEditTargetBatch, setBatchEditTargetBatch] = useState('Batch 1');
+  const [batchEditTargetShipping, setBatchEditTargetShipping] = useState('Ordered');
+  const [batchEditBatchDropdownOpen, setBatchEditBatchDropdownOpen] = useState(false);
+  const [batchEditShippingDropdownOpen, setBatchEditShippingDropdownOpen] = useState(false);
+
   // Close custom dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -326,6 +334,7 @@ export default function App() {
     if (window.confirm('Are you sure you want to delete this order?')) {
       try {
         await deleteDoc(doc(db, "users", user.uid, "pdd_orders", String(id)));
+        setSelectedOrderIds(prev => prev.filter(i => i !== id));
       } catch (error) {
         console.error("Error deleting order: ", error);
       }
@@ -361,6 +370,47 @@ export default function App() {
 
     setIsOrderModalOpen(false);
     setEditingOrder(null);
+  };
+
+  // BATCH EDIT EXECUTION FOR SELECTED ORDERS
+  const handleExecuteBatchEdit = async () => {
+    if (selectedOrderIds.length === 0) return;
+
+    try {
+      for (const id of selectedOrderIds) {
+        const orderToUpdate = orders.find(o => String(o.id) === String(id));
+        if (orderToUpdate) {
+          const updatedPayload = {
+            ...orderToUpdate,
+            batch: batchEditTargetBatch,
+            shippingStatus: batchEditTargetShipping
+          };
+          await setDoc(doc(db, "users", user.uid, "pdd_orders", String(id)), updatedPayload);
+        }
+      }
+      setIsBatchEditOpen(false);
+      setSelectedOrderIds([]);
+      alert(`Successfully updated ${selectedOrderIds.length} orders! ✨`);
+    } catch (error) {
+      console.error("Error batch updating orders: ", error);
+      alert('Failed to batch update orders. Check console for details.');
+    }
+  };
+
+  const handleSelectAllCurrentSlice = (e) => {
+    if (e.target.checked) {
+      const allIdsInSlice = currentOrdersSlice.map(o => o.id);
+      setSelectedOrderIds(prev => Array.from(new Set([...prev, ...allIdsInSlice])));
+    } else {
+      const sliceIds = new Set(currentOrdersSlice.map(o => o.id));
+      setSelectedOrderIds(prev => prev.filter(id => !sliceIds.has(id)));
+    }
+  };
+
+  const handleToggleSelectOrder = (id) => {
+    setSelectedOrderIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
   };
 
   const handleOpenAddWishlist = () => {
@@ -944,16 +994,28 @@ export default function App() {
           </div>
 
           <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', marginBottom: '25px', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
                 📦 General Order Tracker — {selectedBatch} {query && `(Filtered by "${searchQuery}")`}
               </h2>
-              <span style={{ fontSize: '11px', color: '#8c7a6b', fontWeight: '600' }}>Showing {finalFilteredOrders.length} orders found</span>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {selectedOrderIds.length > 0 && (
+                  <button
+                    onClick={() => setIsBatchEditOpen(true)}
+                    style={getButtonStyle('pink')}
+                  >
+                    ✏️ Batch Edit Selected ({selectedOrderIds.length})
+                  </button>
+                )}
+                <span style={{ fontSize: '11px', color: '#8c7a6b', fontWeight: '600' }}>Showing {finalFilteredOrders.length} orders found</span>
+              </div>
             </div>
 
-            <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1300px' }}>
+            <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1350px' }}>
               <colgroup>
-                <col style={{ width: '14%' }} />
+                <col style={{ width: '4%' }} />
+                <col style={{ width: '13%' }} />
                 <col style={{ width: '6%' }} />
                 <col style={{ width: '7%' }} />
                 <col style={{ width: '8%' }} />
@@ -961,15 +1023,24 @@ export default function App() {
                 <col style={{ width: '7%' }} />
                 <col style={{ width: '10%' }} />
                 <col style={{ width: '7%' }} />
-                <col style={{ width: '11%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '9%' }} />
+                <col style={{ width: '10%' }} />
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '8%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '7%' }} />
               </colgroup>
               <thead>
                 <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
-                  <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>Item Name</th>
+                  <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>
+                    <input 
+                      type="checkbox"
+                      onChange={handleSelectAllCurrentSlice}
+                      checked={currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id))}
+                      title="Select all on this page"
+                      style={{ cursor: 'pointer' }}
+                    />
+                  </th>
+                  <th style={{ fontWeight: 'bold' }}>Item Name</th>
                   <th style={{ fontWeight: 'bold' }}>Quantity</th>
                   <th style={{ fontWeight: 'bold' }}>Cost</th>
                   <th style={{ fontWeight: 'bold' }}>Total Cost</th>
@@ -987,15 +1058,24 @@ export default function App() {
               <tbody>
                 {currentOrdersSlice.length === 0 ? (
                   <tr>
-                    <td colSpan="13" style={{ textAlign: 'center', padding: '35px', color: '#b0a499' }}>
+                    <td colSpan="14" style={{ textAlign: 'center', padding: '35px', color: '#b0a499' }}>
                       No matching orders found.
                     </td>
                   </tr>
                 ) : (
                   currentOrdersSlice.map((order) => {
                     const actualDays = calculateActualShippingDays(order.date, order.actualDeliveryDate);
+                    const isSelected = selectedOrderIds.includes(order.id);
                     return (
-                      <tr key={order.id} style={{ borderBottom: '1px solid #fcf6f0' }}>
+                      <tr key={order.id} style={{ borderBottom: '1px solid #fcf6f0', background: isSelected ? '#fff5f7' : 'transparent' }}>
+                        <td style={{ padding: '12px 6px' }}>
+                          <input 
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectOrder(order.id)}
+                            style={{ cursor: 'pointer' }}
+                          />
+                        </td>
                         <td style={{ padding: '12px 8px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{order.name}</td>
                         <td>{order.qty}</td>
                         <td>₱{Number(order.cost).toFixed(2)}</td>
@@ -1393,6 +1473,91 @@ export default function App() {
         </div>
       )}
 
+      {/* --- BATCH EDIT MODAL FOR SELECTED ORDERS --- */}
+      {isBatchEditOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
+          <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '420px', width: '100%', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px' }}>
+              <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
+                ✏️ Batch Edit Selected Orders ({selectedOrderIds.length})
+              </h2>
+              <button 
+                onClick={() => setIsBatchEditOpen(false)} 
+                style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
+              <p style={{ color: '#8c7a6b', margin: 0, lineHeight: '1.4' }}>
+                Update the batch and shipping status for all {selectedOrderIds.length} selected items simultaneously!
+              </p>
+
+              {/* Target Batch Selection */}
+              <div style={{ position: 'relative' }}>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>New Batch</label>
+                <div 
+                  onClick={() => setBatchEditBatchDropdownOpen(!batchEditBatchDropdownOpen)}
+                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                >
+                  <span>{batchEditTargetBatch}</span>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditBatchDropdownOpen ? '▲' : '▼'}</span>
+                </div>
+                {batchEditBatchDropdownOpen && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '150px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
+                    {Array.from({ length: 25 }, (_, i) => `Batch ${i + 1}`).map(b => (
+                      <div 
+                        key={b}
+                        onClick={() => { setBatchEditTargetBatch(b); setBatchEditBatchDropdownOpen(false); }}
+                        style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetBatch === b ? '#ffd166' : 'transparent', fontWeight: batchEditTargetBatch === b ? 'bold' : 'normal', color: '#5c4033' }}
+                      >
+                        {b}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Target Shipping Status Selection */}
+              <div style={{ position: 'relative' }}>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>New Shipping Status</label>
+                <div 
+                  onClick={() => setBatchEditShippingDropdownOpen(!batchEditShippingDropdownOpen)}
+                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                >
+                  <span>{batchEditTargetShipping}</span>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditShippingDropdownOpen ? '▲' : '▼'}</span>
+                </div>
+                {batchEditShippingDropdownOpen && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '160px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
+                    {shippingStatusOptions.map(st => (
+                      <div 
+                        key={st}
+                        onClick={() => { setBatchEditTargetShipping(st); setBatchEditShippingDropdownOpen(false); }}
+                        style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetShipping === st ? '#ffd166' : 'transparent', fontWeight: batchEditTargetShipping === st ? 'bold' : 'normal', color: '#5c4033' }}
+                      >
+                        {st}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Cancel left, Action right */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
+                <button type="button" onClick={() => setIsBatchEditOpen(false)} style={getButtonStyle('light')}>Cancel</button>
+                <button type="button" onClick={handleExecuteBatchEdit} style={getButtonStyle('primary')}>
+                  Apply to {selectedOrderIds.length} Orders
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* --- ADD / EDIT WISHLIST MODAL --- */}
       {isWishlistModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
@@ -1433,21 +1598,19 @@ export default function App() {
               </div>
 
               {/* LIVE COMPUTATION PREVIEW BOX (FOR BOTH ADD & EDIT) */}
-              {wishlistFormData.initialCost !== '' && !isNaN(Number(wishlistFormData.initialCost)) && (
-                <div style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#7f5539' }}>
-                    <span>Initial Total: <strong>₱{(Number(wishlistFormData.qty || 1) * Number(wishlistFormData.initialCost)).toFixed(2)}</strong></span>
-                    <span>Latest Total: <strong>₱{(Number(wishlistFormData.qty || 1) * (wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : Number(wishlistFormData.initialCost))).toFixed(2)}</strong></span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '2px', borderTop: '1px dashed #e6ccb2' }}>
-                    {renderPriceFlag(
-                      Number(wishlistFormData.qty || 1), 
-                      Number(wishlistFormData.initialCost), 
-                      wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : Number(wishlistFormData.initialCost)
-                    )}
-                  </div>
+              <div style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#7f5539' }}>
+                  <span>Initial Total: <strong>₱{(Number(wishlistFormData.qty || 1) * Number(wishlistFormData.initialCost || 0)).toFixed(2)}</strong></span>
+                  <span>Latest Total: <strong>₱{(Number(wishlistFormData.qty || 1) * (wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : Number(wishlistFormData.initialCost || 0))).toFixed(2)}</strong></span>
                 </div>
-              )}
+                <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '2px', borderTop: '1px dashed #e6ccb2' }}>
+                  {renderPriceFlag(
+                    Number(wishlistFormData.qty || 1), 
+                    Number(wishlistFormData.initialCost || 0), 
+                    wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : Number(wishlistFormData.initialCost || 0)
+                  )}
+                </div>
+              </div>
 
               {/* Cancel left, Action right */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
