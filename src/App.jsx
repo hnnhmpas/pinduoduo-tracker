@@ -98,13 +98,17 @@ export default function App() {
   const [modalShippingOpen, setModalShippingOpen] = useState(false);
   const [modalOrderStatusOpen, setModalOrderStatusOpen] = useState(false);
 
-  // BATCH EDIT MODAL / DROPDOWN STATES FOR SELECTED ORDERS
+  // BATCH EDIT STATES FOR SELECTED ORDERS
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
   const [isBatchEditOpen, setIsBatchEditOpen] = useState(false);
   const [batchEditTargetBatch, setBatchEditTargetBatch] = useState('Batch 1');
   const [batchEditTargetShipping, setBatchEditTargetShipping] = useState('Ordered');
+  const [batchEditTargetOrderStatus, setBatchEditTargetOrderStatus] = useState('');
+  const [batchEditTargetActualDelivery, setBatchEditTargetActualDelivery] = useState('');
+  
   const [batchEditBatchDropdownOpen, setBatchEditBatchDropdownOpen] = useState(false);
   const [batchEditShippingDropdownOpen, setBatchEditShippingDropdownOpen] = useState(false);
+  const [batchEditOrderStatusDropdownOpen, setBatchEditOrderStatusDropdownOpen] = useState(false);
 
   // Close custom dropdowns on outside click
   useEffect(() => {
@@ -383,7 +387,9 @@ export default function App() {
           const updatedPayload = {
             ...orderToUpdate,
             batch: batchEditTargetBatch,
-            shippingStatus: batchEditTargetShipping
+            shippingStatus: batchEditTargetShipping,
+            orderStatus: batchEditTargetOrderStatus,
+            actualDeliveryDate: batchEditTargetActualDelivery
           };
           await setDoc(doc(db, "users", user.uid, "pdd_orders", String(id)), updatedPayload);
         }
@@ -1032,13 +1038,38 @@ export default function App() {
               <thead>
                 <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
                   <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>
-                    <input 
-                      type="checkbox"
-                      onChange={handleSelectAllCurrentSlice}
-                      checked={currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id))}
+                    {/* CUSTOM COZY CHECKBOX FOR SELECT ALL */}
+                    <div 
+                      onClick={() => {
+                        const allSelected = currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id));
+                        if (allSelected) {
+                          const sliceIds = new Set(currentOrdersSlice.map(o => o.id));
+                          setSelectedOrderIds(prev => prev.filter(id => !sliceIds.has(id)));
+                        } else {
+                          const allIdsInSlice = currentOrdersSlice.map(o => o.id);
+                          setSelectedOrderIds(prev => Array.from(new Set([...prev, ...allIdsInSlice])));
+                        }
+                      }}
+                      style={{
+                        width: '16px',
+                        height: '16px',
+                        borderRadius: '4px',
+                        border: '1.5px solid #e6ccb2',
+                        background: (currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id))) ? '#ffd166' : '#fffdfa',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        fontSize: '10px',
+                        color: '#5c4033',
+                        fontWeight: 'bold',
+                        margin: '0 auto',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                      }}
                       title="Select all on this page"
-                      style={{ cursor: 'pointer' }}
-                    />
+                    >
+                      {(currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id))) ? '✔' : ''}
+                    </div>
                   </th>
                   <th style={{ fontWeight: 'bold' }}>Item Name</th>
                   <th style={{ fontWeight: 'bold' }}>Quantity</th>
@@ -1069,12 +1100,28 @@ export default function App() {
                     return (
                       <tr key={order.id} style={{ borderBottom: '1px solid #fcf6f0', background: isSelected ? '#fff5f7' : 'transparent' }}>
                         <td style={{ padding: '12px 6px' }}>
-                          <input 
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => handleToggleSelectOrder(order.id)}
-                            style={{ cursor: 'pointer' }}
-                          />
+                          {/* CUSTOM COZY CHECKBOX FOR ROW */}
+                          <div 
+                            onClick={() => handleToggleSelectOrder(order.id)}
+                            style={{
+                              width: '16px',
+                              height: '16px',
+                              borderRadius: '4px',
+                              border: '1.5px solid #e6ccb2',
+                              background: isSelected ? '#ffd166' : '#fffdfa',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              fontSize: '10px',
+                              color: '#5c4033',
+                              fontWeight: 'bold',
+                              margin: '0 auto',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                            }}
+                          >
+                            {isSelected ? '✔' : ''}
+                          </div>
                         </td>
                         <td style={{ padding: '12px 8px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{order.name}</td>
                         <td>{order.qty}</td>
@@ -1476,7 +1523,7 @@ export default function App() {
       {/* --- BATCH EDIT MODAL FOR SELECTED ORDERS --- */}
       {isBatchEditOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '420px', width: '100%', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
+          <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '460px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
@@ -1492,7 +1539,7 @@ export default function App() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
               <p style={{ color: '#8c7a6b', margin: 0, lineHeight: '1.4' }}>
-                Update the batch and shipping status for all {selectedOrderIds.length} selected items simultaneously!
+                Update batch, shipping status, order status, and actual delivery for all {selectedOrderIds.length} selected items simultaneously!
               </p>
 
               {/* Target Batch Selection */}
@@ -1543,6 +1590,42 @@ export default function App() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* Target Order Status Selection */}
+              <div style={{ position: 'relative' }}>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>New Order Status</label>
+                <div 
+                  onClick={() => setBatchEditOrderStatusDropdownOpen(!batchEditOrderStatusDropdownOpen)}
+                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                >
+                  <span>{batchEditTargetOrderStatus || '-- Select Status --'}</span>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditOrderStatusDropdownOpen ? '▲' : '▼'}</span>
+                </div>
+                {batchEditOrderStatusDropdownOpen && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '140px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
+                    {orderStatusOptions.map(ost => (
+                      <div 
+                        key={ost}
+                        onClick={() => { setBatchEditTargetOrderStatus(ost === '-- None --' ? '' : ost); setBatchEditOrderStatusDropdownOpen(false); }}
+                        style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetOrderStatus === ost ? '#ffd166' : 'transparent', fontWeight: batchEditTargetOrderStatus === ost ? 'bold' : 'normal', color: '#5c4033' }}
+                      >
+                        {ost}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Target Actual Delivery Date */}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>New Actual Delivery Date</label>
+                <input 
+                  type="date" 
+                  value={batchEditTargetActualDelivery} 
+                  onChange={(e) => setBatchEditTargetActualDelivery(e.target.value)} 
+                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} 
+                />
               </div>
 
               {/* Cancel left, Action right */}
