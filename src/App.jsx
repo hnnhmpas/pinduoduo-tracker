@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "firebase/auth";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
@@ -21,12 +21,23 @@ const googleProvider = new GoogleAuthProvider();
 // ASSET URLS
 const STRAWBERRY_CAT_URL = "https://i.imgur.com/VS9pglf.png";
 
+// Sentinel meaning "leave this field as it already is" in the batch editor
+const KEEP = '__keep__';
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [loginError, setLoginError] = useState(null);
 
-  // AUTHENTICATION STATE LISTENER
+  // AUTHENTICATION STATE LISTENER & REDRECT RESULT HANDLER
   useEffect(() => {
+    // Handle redirect result if signInWithRedirect was used
+    getRedirectResult(auth)
+      .catch((error) => {
+        console.error("Error with redirect sign-in:", error);
+        setLoginError(error.message);
+      });
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
@@ -35,10 +46,23 @@ export default function App() {
   }, []);
 
   const handleLogin = async () => {
+    setLoginError(null);
     try {
+      // Try popup first; if it fails or gets blocked, fallback to redirect or display error
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
-      console.error("Error signing in: ", error);
+      console.warn("Popup sign-in failed or blocked, trying redirect...", error);
+      if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user') {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (redirectError) {
+          console.error("Error signing in with redirect: ", redirectError);
+          setLoginError(redirectError.message);
+        }
+      } else {
+        setLoginError(error.message);
+      }
     }
   };
 
@@ -101,20 +125,35 @@ export default function App() {
   // BATCH EDIT STATES FOR SELECTED ORDERS
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
   const [isBatchEditOpen, setIsBatchEditOpen] = useState(false);
-  const [batchEditTargetBatch, setBatchEditTargetBatch] = useState('Batch 1');
-  const [batchEditTargetShipping, setBatchEditTargetShipping] = useState('Ordered');
-  const [batchEditTargetOrderStatus, setBatchEditTargetOrderStatus] = useState('');
+  const [batchEditTargetBatch, setBatchEditTargetBatch] = useState(KEEP);
+  const [batchEditTargetShipping, setBatchEditTargetShipping] = useState(KEEP);
+  const [batchEditTargetOrderStatus, setBatchEditTargetOrderStatus] = useState(KEEP);
   const [batchEditTargetActualDelivery, setBatchEditTargetActualDelivery] = useState('');
   
   const [batchEditBatchDropdownOpen, setBatchEditBatchDropdownOpen] = useState(false);
   const [batchEditShippingDropdownOpen, setBatchEditShippingDropdownOpen] = useState(false);
   const [batchEditOrderStatusDropdownOpen, setBatchEditOrderStatusDropdownOpen] = useState(false);
 
+  // CONFIRMATION DIALOG (used by every delete button)
+  const [confirmDialog, setConfirmDialog] = useState(null);
+
+  // WISHLIST SELECTION + MOVE-TO-BATCH STATES
+  const [selectedWishlistIds, setSelectedWishlistIds] = useState([]);
+  const [wishlistMoveBatch, setWishlistMoveBatch] = useState(null); // null = auto (latest batch used in orders)
+  const [wishlistMoveBatchOpen, setWishlistMoveBatchOpen] = useState(false);
+  const wishlistMoveRef = useRef(null);
+
+  // UNDO STATE FOR WISHLIST -> ORDERS MOVES
+  const [lastMove, setLastMove] = useState(null);
+
   // Close custom dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsBatchDropdownOpen(false);
+      }
+      if (wishlistMoveRef.current && !wishlistMoveRef.current.contains(event.target)) {
+        setWishlistMoveBatchOpen(false);
       }
       if (accountMenuRef.current && !accountMenuRef.current.contains(event.target)) {
         setIsAccountMenuOpen(false);
@@ -334,15 +373,19 @@ export default function App() {
     setIsOrderModalOpen(true);
   };
 
-  const handleDeleteOrder = async (id) => {
-    if (window.confirm('Are you sure you want to delete this order?')) {
-      try {
-        await deleteDoc(doc(db, "users", user.uid, "pdd_orders", String(id)));
-        setSelectedOrderIds(prev => prev.filter(i => i !== id));
-      } catch (error) {
-        console.error("Error deleting order: ", error);
+  const handleDeleteOrder = (order) => {
+    setConfirmDialog({
+      title: 'Delete this order?',
+      message: `"${order.name}" will be permanently removed from your tracker. This can't be undone.`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, "users", user.uid, "pdd_orders", String(order.id)));
+          setSelectedOrderIds(prev => prev.filter(i => i !== order.id));
+        } catch (error) {
+          console.error("Error deleting order: ", error);
+        }
       }
-    }
+    });
   };
 
   const handleSaveOrder = async (e) => {
@@ -376,40 +419,53 @@ export default function App() {
     setEditingOrder(null);
   };
 
-  // BATCH EDIT EXECUTION FOR SELECTED ORDERS
+  const handleOpenBatchEdit = () => {
+    const selected = orders.filter(o => selectedOrderIds.includes(o.id));
+    const common = (getter, fallback) => {
+      if (selected.length === 0) return fallback;
+      const first = getter(selected[0]);
+      return selected.every(o => getter(o) === first) ? first : fallback;
+    };
+
+    setBatchEditTargetBatch(common(o => o.batch || '', KEEP) || KEEP);
+    setBatchEditTargetShipping(common(o => o.shippingStatus || 'Ordered', KEEP));
+    setBatchEditTargetOrderStatus(common(o => o.orderStatus || '', KEEP));
+    setBatchEditTargetActualDelivery(common(o => o.actualDeliveryDate || '', ''));
+    setBatchEditBatchDropdownOpen(false);
+    setBatchEditShippingDropdownOpen(false);
+    setBatchEditOrderStatusDropdownOpen(false);
+    setIsBatchEditOpen(true);
+  };
+
   const handleExecuteBatchEdit = async () => {
     if (selectedOrderIds.length === 0) return;
 
+    const changes = {};
+    if (batchEditTargetBatch !== KEEP) changes.batch = batchEditTargetBatch;
+    if (batchEditTargetShipping !== KEEP) changes.shippingStatus = batchEditTargetShipping;
+    if (batchEditTargetOrderStatus !== KEEP) changes.orderStatus = batchEditTargetOrderStatus;
+    if (batchEditTargetActualDelivery) changes.actualDeliveryDate = batchEditTargetActualDelivery;
+
+    if (Object.keys(changes).length === 0) {
+      setIsBatchEditOpen(false);
+      return;
+    }
+
     try {
+      let updated = 0;
       for (const id of selectedOrderIds) {
-        const orderToUpdate = orders.find(o => String(o.id) === String(id));
-        if (orderToUpdate) {
-          const updatedPayload = {
-            ...orderToUpdate,
-            batch: batchEditTargetBatch,
-            shippingStatus: batchEditTargetShipping,
-            orderStatus: batchEditTargetOrderStatus,
-            actualDeliveryDate: batchEditTargetActualDelivery
-          };
-          await setDoc(doc(db, "users", user.uid, "pdd_orders", String(id)), updatedPayload);
+        const exists = orders.some(o => String(o.id) === String(id));
+        if (exists) {
+          await setDoc(doc(db, "users", user.uid, "pdd_orders", String(id)), changes, { merge: true });
+          updated++;
         }
       }
       setIsBatchEditOpen(false);
       setSelectedOrderIds([]);
-      alert(`Successfully updated ${selectedOrderIds.length} orders! ✨`);
+      alert(`Successfully updated ${updated} orders! ✨`);
     } catch (error) {
       console.error("Error batch updating orders: ", error);
       alert('Failed to batch update orders. Check console for details.');
-    }
-  };
-
-  const handleSelectAllCurrentSlice = (e) => {
-    if (e.target.checked) {
-      const allIdsInSlice = currentOrdersSlice.map(o => o.id);
-      setSelectedOrderIds(prev => Array.from(new Set([...prev, ...allIdsInSlice])));
-    } else {
-      const sliceIds = new Set(currentOrdersSlice.map(o => o.id));
-      setSelectedOrderIds(prev => prev.filter(id => !sliceIds.has(id)));
     }
   };
 
@@ -436,14 +492,19 @@ export default function App() {
     setIsWishlistModalOpen(true);
   };
 
-  const handleDeleteWishlist = async (id) => {
-    if (window.confirm('Are you sure you want to delete this item from your wishlist?')) {
-      try {
-        await deleteDoc(doc(db, "users", user.uid, "pdd_wishlist", String(id)));
-      } catch (error) {
-        console.error("Error deleting wishlist item: ", error);
+  const handleDeleteWishlist = (item) => {
+    setConfirmDialog({
+      title: 'Delete this wishlist item?',
+      message: `"${item.name}" will be permanently removed from your wishlist. This can't be undone.`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, "users", user.uid, "pdd_wishlist", String(item.id)));
+          setSelectedWishlistIds(prev => prev.filter(i => i !== item.id));
+        } catch (error) {
+          console.error("Error deleting wishlist item: ", error);
+        }
       }
-    }
+    });
   };
 
   const handleSaveWishlist = async (e) => {
@@ -474,29 +535,82 @@ export default function App() {
     setEditingWishlistItem(null);
   };
 
-  const handleMoveToTracker = async (itemToMove) => {
+  const getLatestOrderBatch = () => {
+    let latest = null;
+    let latestId = -Infinity;
+    orders.forEach(o => {
+      const n = Number(o.id);
+      const idNum = Number.isFinite(n) ? n : 0;
+      if (idNum >= latestId) {
+        latestId = idNum;
+        latest = o;
+      }
+    });
+    return (latest && latest.batch) || 'Batch 1';
+  };
+
+  const latestOrderBatch = getLatestOrderBatch();
+  const effectiveMoveBatch = wishlistMoveBatch || latestOrderBatch;
+
+  const handleMoveItemsToTracker = async (items) => {
+    if (!items || items.length === 0) return;
+
     const today = new Date().toISOString().split('T')[0];
-    const newOrderId = String(Date.now());
-    const newOrder = {
-      name: itemToMove.name,
-      qty: itemToMove.qty,
-      cost: itemToMove.latestCost || itemToMove.initialCost,
-      date: today,
-      batch: 'Batch 1',
-      shippingStatus: 'Ordered',
-      orderStatus: '',
-      notes: 'Transferred from Wishlist',
-      actualDeliveryDate: '',
-      estDelivery: calculateEstDelivery(today)
-    };
+    const targetBatch = effectiveMoveBatch;
+    const moved = [];
+    let idCounter = Date.now();
 
     try {
-      await setDoc(doc(db, "users", user.uid, "pdd_orders", newOrderId), newOrder);
-      await deleteDoc(doc(db, "users", user.uid, "pdd_wishlist", String(itemToMove.id)));
-      setActiveTab('orders');
+      for (const item of items) {
+        const newOrderId = String(idCounter++);
+        const { id: wishlistId, ...wishlistData } = item;
+
+        const newOrder = {
+          name: item.name,
+          qty: item.qty,
+          cost: item.latestCost || item.initialCost,
+          date: today,
+          batch: targetBatch,
+          shippingStatus: 'Ordered',
+          orderStatus: '',
+          notes: 'Transferred from Wishlist',
+          actualDeliveryDate: '',
+          estDelivery: calculateEstDelivery(today)
+        };
+
+        await setDoc(doc(db, "users", user.uid, "pdd_orders", newOrderId), newOrder);
+        await deleteDoc(doc(db, "users", user.uid, "pdd_wishlist", String(wishlistId)));
+        moved.push({ wishlistId: String(wishlistId), wishlistData, orderId: newOrderId });
+      }
     } catch (error) {
       console.error("Error moving item to tracker: ", error);
     }
+
+    if (moved.length > 0) {
+      setSelectedWishlistIds(prev => prev.filter(id => !moved.some(m => m.wishlistId === String(id))));
+      setLastMove({ items: moved, batch: targetBatch });
+    }
+  };
+
+  const handleUndoMove = async () => {
+    if (!lastMove) return;
+    try {
+      for (const m of lastMove.items) {
+        await setDoc(doc(db, "users", user.uid, "pdd_wishlist", m.wishlistId), m.wishlistData);
+        await deleteDoc(doc(db, "users", user.uid, "pdd_orders", m.orderId));
+        setSelectedOrderIds(prev => prev.filter(i => String(i) !== m.orderId));
+      }
+      setLastMove(null);
+    } catch (error) {
+      console.error("Error undoing move: ", error);
+      alert('Failed to undo the move. Check console for details.');
+    }
+  };
+
+  const handleToggleSelectWishlist = (id) => {
+    setSelectedWishlistIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
   };
 
   const query = searchQuery.trim().toLowerCase();
@@ -554,7 +668,14 @@ export default function App() {
 
   const totalOrdersCount = batchFilteredOrders.length;
   const deliveredCount = batchFilteredOrders.filter(o => o.shippingStatus === 'Delivered').length;
-  const missingRefundedCount = batchFilteredOrders.filter(o => o.orderStatus === 'Missing' || o.orderStatus === 'Damaged' || o.orderStatus === 'Refunded').length;
+  const totalQuantity = batchFilteredOrders.reduce((acc, o) => acc + (Number(o.qty) || 0), 0);
+  const statusStats = (status) => {
+    const list = batchFilteredOrders.filter(o => o.shippingStatus === status);
+    return { entries: list.length, pcs: list.reduce((acc, o) => acc + (Number(o.qty) || 0), 0) };
+  };
+  const inTransitStats = statusStats('In Transit to PH');
+  const phCustomsStats = statusStats('PH Customs Clearance');
+  const phHubStats = statusStats('PH Hub / Out for Local Delivery');
 
   const shippingDaysList = batchFilteredOrders.map(o => calculateActualShippingDays(o.date, o.actualDeliveryDate)).filter(d => d !== null);
   const avgShippingDays = shippingDaysList.length > 0 
@@ -665,6 +786,11 @@ export default function App() {
             <p style={{ fontSize: '12px', color: '#8c7a6b', marginBottom: '25px', lineHeight: '1.5' }}>
               Sign in with your Google account to access your private order tracker and real-time cloud syncing! ✨
             </p>
+            {loginError && (
+              <div style={{ background: '#ffccd5', color: '#780000', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', marginBottom: '15px', wordBreak: 'break-word' }}>
+                {loginError}
+              </div>
+            )}
             <button
               onClick={handleLogin}
               style={{
@@ -980,6 +1106,10 @@ export default function App() {
                   <strong style={{ fontSize: '16px', color: '#5c4033' }}>{totalOrdersCount}</strong>
                 </div>
                 <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>TOTAL QUANTITY (PCS)</span>
+                  <strong style={{ fontSize: '16px', color: '#5c4033' }}>{totalQuantity}</strong>
+                </div>
+                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
                   <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>TOTAL SPENT</span>
                   <strong style={{ fontSize: '16px', color: '#bc6c25' }}>₱{displayTotalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                 </div>
@@ -988,8 +1118,19 @@ export default function App() {
                   <strong style={{ fontSize: '16px', color: '#2d6a4f' }}>{deliveredCount}</strong>
                 </div>
                 <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>MISSING / REFUNDED</span>
-                  <strong style={{ fontSize: '16px', color: '#780000' }}>{missingRefundedCount}</strong>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>IN TRANSIT TO PH</span>
+                  <strong style={{ fontSize: '16px', color: '#bc6c25' }}>{inTransitStats.entries}</strong>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', marginTop: '2px' }}>{inTransitStats.pcs} pcs</span>
+                </div>
+                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>IN PH CUSTOMS</span>
+                  <strong style={{ fontSize: '16px', color: '#6a4c93' }}>{phCustomsStats.entries}</strong>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', marginTop: '2px' }}>{phCustomsStats.pcs} pcs</span>
+                </div>
+                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>PH HUB / OUT FOR DELIVERY</span>
+                  <strong style={{ fontSize: '16px', color: '#2d6a4f' }}>{phHubStats.entries}</strong>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', marginTop: '2px' }}>{phHubStats.pcs} pcs</span>
                 </div>
                 <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
                   <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>AVG SHIPPING DAYS</span>
@@ -1008,7 +1149,7 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 {selectedOrderIds.length > 0 && (
                   <button
-                    onClick={() => setIsBatchEditOpen(true)}
+                    onClick={handleOpenBatchEdit}
                     style={getButtonStyle('pink')}
                   >
                     ✏️ Batch Edit Selected ({selectedOrderIds.length})
@@ -1038,7 +1179,6 @@ export default function App() {
               <thead>
                 <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
                   <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>
-                    {/* CUSTOM COZY CHECKBOX FOR SELECT ALL */}
                     <div 
                       onClick={() => {
                         const allSelected = currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id));
@@ -1100,7 +1240,6 @@ export default function App() {
                     return (
                       <tr key={order.id} style={{ borderBottom: '1px solid #fcf6f0', background: isSelected ? '#fff5f7' : 'transparent' }}>
                         <td style={{ padding: '12px 6px' }}>
-                          {/* CUSTOM COZY CHECKBOX FOR ROW */}
                           <div 
                             onClick={() => handleToggleSelectOrder(order.id)}
                             style={{
@@ -1171,7 +1310,7 @@ export default function App() {
                             </button>
                             <button 
                               style={getButtonStyle('danger')}
-                              onClick={() => handleDeleteOrder(order.id)}
+                              onClick={() => handleDeleteOrder(order)}
                             >
                               🗑️
                             </button>
@@ -1224,21 +1363,98 @@ export default function App() {
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
                 ✨ Wishlist Tracker & Price Monitor {query && `(Filtered by "${searchQuery}")`}
               </h2>
+             
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative' }} ref={wishlistMoveRef}>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '2px' }}>MOVE TO BATCH</span>
+                  <button
+                    onClick={() => setWishlistMoveBatchOpen(prev => !prev)}
+                    style={getButtonStyle('light')}
+                    title="Batch that moved items will be placed in"
+                  >
+                    {effectiveMoveBatch}{wishlistMoveBatch === null ? ' (auto)' : ''}
+                    <span style={{ fontSize: '10px', color: '#8c7a6b', marginLeft: '4px' }}>{wishlistMoveBatchOpen ? '▲' : '▼'}</span>
+                  </button>
+
+                  {wishlistMoveBatchOpen && (
+                    <div style={{ position: 'absolute', top: '105%', right: 0, width: '210px', maxHeight: '240px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '14px', boxShadow: '0 8px 25px rgba(230, 204, 178, 0.5)', zIndex: 200, padding: '6px', boxSizing: 'border-box' }}>
+                      <div
+                        onClick={() => { setWishlistMoveBatch(null); setWishlistMoveBatchOpen(false); }}
+                        style={{ padding: '8px 10px', fontSize: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: wishlistMoveBatch === null ? '700' : '500', color: '#5c4033', background: wishlistMoveBatch === null ? '#ffd166' : 'transparent', marginBottom: '2px' }}
+                      >
+                        ✨ Auto (latest used: {latestOrderBatch})
+                      </div>
+                      {Array.from({ length: 25 }, (_, i) => `Batch ${i + 1}`).map(b => (
+                        <div
+                          key={b}
+                          onClick={() => { setWishlistMoveBatch(b); setWishlistMoveBatchOpen(false); }}
+                          style={{ padding: '8px 10px', fontSize: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: wishlistMoveBatch === b ? '700' : '500', color: '#5c4033', background: wishlistMoveBatch === b ? '#ffd166' : 'transparent', marginBottom: '2px' }}
+                        >
+                          {b}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {selectedWishlistIds.length > 0 && (
+                  <button
+                    onClick={() => handleMoveItemsToTracker(wishlist.filter(w => selectedWishlistIds.includes(w.id)))}
+                    style={getButtonStyle('pink')}
+                  >
+                    ➡️ Move Selected to Orders ({selectedWishlistIds.length})
+                  </button>
+                )}
+              </div>
             </div>
 
-            <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1000px' }}>
+            <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1100px' }}>
               <colgroup>
-                <col style={{ width: '25%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '22%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '16%' }} />
               </colgroup>
               <thead>
                 <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
-                  <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>Item Name</th>
+                  <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>
+                    <div
+                      onClick={() => {
+                        const allSelected = currentWishlistSlice.length > 0 && currentWishlistSlice.every(w => selectedWishlistIds.includes(w.id));
+                        if (allSelected) {
+                          const sliceIds = new Set(currentWishlistSlice.map(w => w.id));
+                          setSelectedWishlistIds(prev => prev.filter(id => !sliceIds.has(id)));
+                        } else {
+                          const allIdsInSlice = currentWishlistSlice.map(w => w.id);
+                          setSelectedWishlistIds(prev => Array.from(new Set([...prev, ...allIdsInSlice])));
+                        }
+                      }}
+                      style={{
+                        width: '16px',
+                        height: '16px',
+                        borderRadius: '4px',
+                        border: '1.5px solid #e6ccb2',
+                        background: (currentWishlistSlice.length > 0 && currentWishlistSlice.every(w => selectedWishlistIds.includes(w.id))) ? '#ffd166' : '#fffdfa',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        fontSize: '10px',
+                        color: '#5c4033',
+                        fontWeight: 'bold',
+                        margin: '0 auto',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                      }}
+                      title="Select all on this page"
+                    >
+                      {(currentWishlistSlice.length > 0 && currentWishlistSlice.every(w => selectedWishlistIds.includes(w.id))) ? '✔' : ''}
+                    </div>
+                  </th>
+                  <th style={{ fontWeight: 'bold' }}>Item Name</th>
                   <th style={{ fontWeight: 'bold' }}>Quantity</th>
                   <th style={{ fontWeight: 'bold' }}>Initial Cost</th>
                   <th style={{ fontWeight: 'bold' }}>Initial Total Cost</th>
@@ -1250,13 +1466,36 @@ export default function App() {
               <tbody>
                 {currentWishlistSlice.length === 0 ? (
                   <tr>
-                    <td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: '#b0a499' }}>
+                    <td colSpan="8" style={{ textAlign: 'center', padding: '30px', color: '#b0a499' }}>
                       No matching wishlist items found.
                     </td>
                   </tr>
                 ) : (
                   currentWishlistSlice.map((item) => (
-                    <tr key={item.id} style={{ borderBottom: '1px solid #fcf6f0' }}>
+                    <tr key={item.id} style={{ borderBottom: '1px solid #fcf6f0', background: selectedWishlistIds.includes(item.id) ? '#fff5f7' : 'transparent' }}>
+                      <td style={{ padding: '12px 6px' }}>
+                        <div
+                          onClick={() => handleToggleSelectWishlist(item.id)}
+                          style={{
+                            width: '16px',
+                            height: '16px',
+                            borderRadius: '4px',
+                            border: '1.5px solid #e6ccb2',
+                            background: selectedWishlistIds.includes(item.id) ? '#ffd166' : '#fffdfa',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            fontSize: '10px',
+                            color: '#5c4033',
+                            fontWeight: 'bold',
+                            margin: '0 auto',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                          }}
+                        >
+                          {selectedWishlistIds.includes(item.id) ? '✔' : ''}
+                        </div>
+                      </td>
                       <td style={{ padding: '12px 10px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{item.name}</td>
                       <td>{item.qty}</td>
                       <td>₱{Number(item.initialCost).toFixed(2)}</td>
@@ -1273,13 +1512,13 @@ export default function App() {
                           </button>
                           <button 
                             style={getButtonStyle('primary')}
-                            onClick={() => handleMoveToTracker(item)}
+                            onClick={() => handleMoveItemsToTracker([item])}
                           >
                             Move
                           </button>
                           <button 
                             style={getButtonStyle('danger')}
-                            onClick={() => handleDeleteWishlist(item.id)}
+                            onClick={() => handleDeleteWishlist(item)}
                           >
                             🗑️
                           </button>
@@ -1293,7 +1532,6 @@ export default function App() {
 
             {renderPagination(wishlistPage, totalWishlistPages, setWishlistPage, wishlistPerPage, setWishlistPerPage)}
           </div>
-
         </div>
       )}
 
@@ -1539,28 +1777,28 @@ export default function App() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
               <p style={{ color: '#8c7a6b', margin: 0, lineHeight: '1.4' }}>
-                Update batch, shipping status, order status, and actual delivery for all {selectedOrderIds.length} selected items simultaneously!
+                Fields that are already filled in stay as they are. Only change what you want to update for all {selectedOrderIds.length} selected items!
               </p>
 
               {/* Target Batch Selection */}
               <div style={{ position: 'relative' }}>
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>New Batch</label>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Batch</label>
                 <div 
                   onClick={() => setBatchEditBatchDropdownOpen(!batchEditBatchDropdownOpen)}
                   style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
-                  <span>{batchEditTargetBatch}</span>
+                  <span>{batchEditTargetBatch === KEEP ? '-- Keep current --' : batchEditTargetBatch}</span>
                   <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditBatchDropdownOpen ? '▲' : '▼'}</span>
                 </div>
                 {batchEditBatchDropdownOpen && (
                   <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '150px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
-                    {Array.from({ length: 25 }, (_, i) => `Batch ${i + 1}`).map(b => (
+                    {[KEEP, ...Array.from({ length: 25 }, (_, i) => `Batch ${i + 1}`)].map(b => (
                       <div 
                         key={b}
                         onClick={() => { setBatchEditTargetBatch(b); setBatchEditBatchDropdownOpen(false); }}
                         style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetBatch === b ? '#ffd166' : 'transparent', fontWeight: batchEditTargetBatch === b ? 'bold' : 'normal', color: '#5c4033' }}
                       >
-                        {b}
+                        {b === KEEP ? '-- Keep current --' : b}
                       </div>
                     ))}
                   </div>
@@ -1569,23 +1807,23 @@ export default function App() {
 
               {/* Target Shipping Status Selection */}
               <div style={{ position: 'relative' }}>
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>New Shipping Status</label>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Shipping Status</label>
                 <div 
                   onClick={() => setBatchEditShippingDropdownOpen(!batchEditShippingDropdownOpen)}
                   style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
-                  <span>{batchEditTargetShipping}</span>
+                  <span>{batchEditTargetShipping === KEEP ? '-- Keep current --' : batchEditTargetShipping}</span>
                   <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditShippingDropdownOpen ? '▲' : '▼'}</span>
                 </div>
                 {batchEditShippingDropdownOpen && (
                   <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '160px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
-                    {shippingStatusOptions.map(st => (
+                    {[KEEP, ...shippingStatusOptions].map(st => (
                       <div 
                         key={st}
                         onClick={() => { setBatchEditTargetShipping(st); setBatchEditShippingDropdownOpen(false); }}
                         style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetShipping === st ? '#ffd166' : 'transparent', fontWeight: batchEditTargetShipping === st ? 'bold' : 'normal', color: '#5c4033' }}
                       >
-                        {st}
+                        {st === KEEP ? '-- Keep current --' : st}
                       </div>
                     ))}
                   </div>
@@ -1594,23 +1832,23 @@ export default function App() {
 
               {/* Target Order Status Selection */}
               <div style={{ position: 'relative' }}>
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>New Order Status</label>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Order Status</label>
                 <div 
                   onClick={() => setBatchEditOrderStatusDropdownOpen(!batchEditOrderStatusDropdownOpen)}
                   style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
-                  <span>{batchEditTargetOrderStatus || '-- Select Status --'}</span>
+                  <span>{batchEditTargetOrderStatus === KEEP ? '-- Keep current --' : (batchEditTargetOrderStatus || '-- None --')}</span>
                   <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditOrderStatusDropdownOpen ? '▲' : '▼'}</span>
                 </div>
                 {batchEditOrderStatusDropdownOpen && (
                   <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '140px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
-                    {orderStatusOptions.map(ost => (
+                    {[KEEP, ...orderStatusOptions].map(ost => (
                       <div 
                         key={ost}
                         onClick={() => { setBatchEditTargetOrderStatus(ost === '-- None --' ? '' : ost); setBatchEditOrderStatusDropdownOpen(false); }}
                         style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetOrderStatus === ost ? '#ffd166' : 'transparent', fontWeight: batchEditTargetOrderStatus === ost ? 'bold' : 'normal', color: '#5c4033' }}
                       >
-                        {ost}
+                        {ost === KEEP ? '-- Keep current --' : ost}
                       </div>
                     ))}
                   </div>
@@ -1619,7 +1857,7 @@ export default function App() {
 
               {/* Target Actual Delivery Date */}
               <div>
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>New Actual Delivery Date</label>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Actual Delivery Date (leave empty to keep current)</label>
                 <input 
                   type="date" 
                   value={batchEditTargetActualDelivery} 
@@ -1628,7 +1866,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Cancel left, Action right */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsBatchEditOpen(false)} style={getButtonStyle('light')}>Cancel</button>
                 <button type="button" onClick={handleExecuteBatchEdit} style={getButtonStyle('primary')}>
@@ -1637,6 +1874,48 @@ export default function App() {
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* --- UNDO TOAST (after moving wishlist items to orders) --- */}
+      {lastMove && (
+        <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 1500, background: '#fffdfa', border: '1px solid #e6ccb2', borderTop: '4px solid #bde0fe', borderRadius: '16px', padding: '12px 16px', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.6)', display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '92vw', boxSizing: 'border-box', fontSize: '12px', color: '#5c4033', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <span>
+            ✨ Moved {lastMove.items.length} {lastMove.items.length === 1 ? 'item' : 'items'} to <strong>{lastMove.batch}</strong> in General Orders.
+          </span>
+          <button onClick={handleUndoMove} style={getButtonStyle('blue')}>↩ Undo</button>
+          <button
+            onClick={() => setLastMove(null)}
+            style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '26px', height: '26px', fontSize: '11px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            title="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* --- DELETE CONFIRMATION DIALOG --- */}
+      {confirmDialog && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.4)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000, padding: '15px', boxSizing: 'border-box' }}>
+          <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '380px', width: '100%', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.5)', borderTop: '5px solid #ffccd5', boxSizing: 'border-box', border: '1px solid #e6ccb2', textAlign: 'center' }}>
+            <div style={{ fontSize: '28px', marginBottom: '6px' }}>🗑️</div>
+            <h2 style={{ fontSize: '16px', margin: '0 0 8px 0', color: '#7f5539', fontWeight: '700' }}>{confirmDialog.title}</h2>
+            <p style={{ fontSize: '12px', color: '#8c7a6b', margin: '0 0 20px 0', lineHeight: '1.5', wordBreak: 'break-word' }}>{confirmDialog.message}</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button type="button" onClick={() => setConfirmDialog(null)} style={getButtonStyle('light')}>Cancel</button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const run = confirmDialog.onConfirm;
+                  setConfirmDialog(null);
+                  await run();
+                }}
+                style={getButtonStyle('danger')}
+              >
+                Yes, delete
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1680,7 +1959,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* LIVE COMPUTATION PREVIEW BOX (FOR BOTH ADD & EDIT) */}
               <div style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#7f5539' }}>
                   <span>Initial Total: <strong>₱{(Number(wishlistFormData.qty || 1) * Number(wishlistFormData.initialCost || 0)).toFixed(2)}</strong></span>
@@ -1695,7 +1973,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Cancel left, Action right */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsWishlistModalOpen(false)} style={getButtonStyle('light')}>Cancel</button>
                 <button type="submit" style={getButtonStyle('primary')}>
