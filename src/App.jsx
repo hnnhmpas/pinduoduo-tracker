@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
@@ -27,17 +27,9 @@ const KEEP = '__keep__';
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [loginError, setLoginError] = useState(null);
 
-  // AUTHENTICATION STATE LISTENER & REDRECT RESULT HANDLER
+  // AUTHENTICATION STATE LISTENER
   useEffect(() => {
-    // Handle redirect result if signInWithRedirect was used
-    getRedirectResult(auth)
-      .catch((error) => {
-        console.error("Error with redirect sign-in:", error);
-        setLoginError(error.message);
-      });
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
@@ -46,23 +38,10 @@ export default function App() {
   }, []);
 
   const handleLogin = async () => {
-    setLoginError(null);
     try {
-      // Try popup first; if it fails or gets blocked, fallback to redirect or display error
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
-      console.warn("Popup sign-in failed or blocked, trying redirect...", error);
-      if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user') {
-        try {
-          await signInWithRedirect(auth, googleProvider);
-          return;
-        } catch (redirectError) {
-          console.error("Error signing in with redirect: ", redirectError);
-          setLoginError(redirectError.message);
-        }
-      } else {
-        setLoginError(error.message);
-      }
+      console.error("Error signing in: ", error);
     }
   };
 
@@ -419,6 +398,8 @@ export default function App() {
     setEditingOrder(null);
   };
 
+  // OPEN BATCH EDIT: pre-fill with whatever the selected orders already have in common.
+  // Anything that differs between the selected orders (or is untouched) is kept as-is.
   const handleOpenBatchEdit = () => {
     const selected = orders.filter(o => selectedOrderIds.includes(o.id));
     const common = (getter, fallback) => {
@@ -437,6 +418,7 @@ export default function App() {
     setIsBatchEditOpen(true);
   };
 
+  // BATCH EDIT EXECUTION: only fields you actually chose are written (merge), everything else stays untouched
   const handleExecuteBatchEdit = async () => {
     if (selectedOrderIds.length === 0) return;
 
@@ -466,6 +448,16 @@ export default function App() {
     } catch (error) {
       console.error("Error batch updating orders: ", error);
       alert('Failed to batch update orders. Check console for details.');
+    }
+  };
+
+  const handleSelectAllCurrentSlice = (e) => {
+    if (e.target.checked) {
+      const allIdsInSlice = currentOrdersSlice.map(o => o.id);
+      setSelectedOrderIds(prev => Array.from(new Set([...prev, ...allIdsInSlice])));
+    } else {
+      const sliceIds = new Set(currentOrdersSlice.map(o => o.id));
+      setSelectedOrderIds(prev => prev.filter(id => !sliceIds.has(id)));
     }
   };
 
@@ -535,6 +527,7 @@ export default function App() {
     setEditingWishlistItem(null);
   };
 
+  // SMART BATCH: the batch of the most recently added order (falls back to Batch 1)
   const getLatestOrderBatch = () => {
     let latest = null;
     let latestId = -Infinity;
@@ -552,6 +545,7 @@ export default function App() {
   const latestOrderBatch = getLatestOrderBatch();
   const effectiveMoveBatch = wishlistMoveBatch || latestOrderBatch;
 
+  // Move one or many wishlist items into General Orders (stays on the Wishlist tab)
   const handleMoveItemsToTracker = async (items) => {
     if (!items || items.length === 0) return;
 
@@ -592,6 +586,7 @@ export default function App() {
     }
   };
 
+  // UNDO: put the moved items back on the wishlist exactly as they were, remove the created orders
   const handleUndoMove = async () => {
     if (!lastMove) return;
     try {
@@ -786,11 +781,6 @@ export default function App() {
             <p style={{ fontSize: '12px', color: '#8c7a6b', marginBottom: '25px', lineHeight: '1.5' }}>
               Sign in with your Google account to access your private order tracker and real-time cloud syncing! ✨
             </p>
-            {loginError && (
-              <div style={{ background: '#ffccd5', color: '#780000', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', marginBottom: '15px', wordBreak: 'break-word' }}>
-                {loginError}
-              </div>
-            )}
             <button
               onClick={handleLogin}
               style={{
@@ -1179,6 +1169,7 @@ export default function App() {
               <thead>
                 <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
                   <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>
+                    {/* CUSTOM COZY CHECKBOX FOR SELECT ALL */}
                     <div 
                       onClick={() => {
                         const allSelected = currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id));
@@ -1240,6 +1231,7 @@ export default function App() {
                     return (
                       <tr key={order.id} style={{ borderBottom: '1px solid #fcf6f0', background: isSelected ? '#fff5f7' : 'transparent' }}>
                         <td style={{ padding: '12px 6px' }}>
+                          {/* CUSTOM COZY CHECKBOX FOR ROW */}
                           <div 
                             onClick={() => handleToggleSelectOrder(order.id)}
                             style={{
@@ -1363,7 +1355,7 @@ export default function App() {
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
                 ✨ Wishlist Tracker & Price Monitor {query && `(Filtered by "${searchQuery}")`}
               </h2>
-             
+            
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <div style={{ position: 'relative' }} ref={wishlistMoveRef}>
                   <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '2px' }}>MOVE TO BATCH</span>
@@ -1532,6 +1524,7 @@ export default function App() {
 
             {renderPagination(wishlistPage, totalWishlistPages, setWishlistPage, wishlistPerPage, setWishlistPerPage)}
           </div>
+
         </div>
       )}
 
@@ -1866,6 +1859,7 @@ export default function App() {
                 />
               </div>
 
+              {/* Cancel left, Action right */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsBatchEditOpen(false)} style={getButtonStyle('light')}>Cancel</button>
                 <button type="button" onClick={handleExecuteBatchEdit} style={getButtonStyle('primary')}>
@@ -1959,6 +1953,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* LIVE COMPUTATION PREVIEW BOX (FOR BOTH ADD & EDIT) */}
               <div style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#7f5539' }}>
                   <span>Initial Total: <strong>₱{(Number(wishlistFormData.qty || 1) * Number(wishlistFormData.initialCost || 0)).toFixed(2)}</strong></span>
@@ -1973,6 +1968,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Cancel left, Action right */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsWishlistModalOpen(false)} style={getButtonStyle('light')}>Cancel</button>
                 <button type="submit" style={getButtonStyle('primary')}>
