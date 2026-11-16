@@ -15,8 +15,9 @@ import React, { useEffect, useLayoutEffect, useReducer, useRef, useState } from 
      part        1 | 2 | 3   (shown as a small label in the tooltip)
      tab         'orders' | 'wishlist'  – tab that must be showing
      modal       null | 'order' | 'wishlist' | 'batch'
-     sample      null | 'order' | 'wishlist' – a row must exist (real
-                 entry made during the tour, or a temporary sample)
+     sample      null | 'order' | 'order-delivered' | 'order-archived' | 'wishlist'
+                 – a row must exist (a real entry made during the tour, or a
+                 temporary sample; the delivered/archived kinds are always samples)
      checkRow    true → the target order's row checkbox is ticked
      interactive true → the user may click/type inside the spotlight
                  (everything else stays blocked)
@@ -28,7 +29,8 @@ export const TOUR_SAMPLE_WISHLIST_ID = 'tour-sample-wishlist';
 export const TOUR_PARTS = {
   1: { en: 'Adding an Order', tl: 'Pag-log ng Order' },
   2: { en: 'Managing Orders & Batch Editing', tl: 'Pag-manage ng Orders at Batch Edit' },
-  3: { en: 'Wishlist & Moving Items', tl: 'Wishlist at Paglipat ng Items' },
+  3: { en: 'Archive & Restore', tl: 'Archive at Restore' },
+  4: { en: 'Wishlist & Moving Items', tl: 'Wishlist at Paglipat ng Items' },
 };
 
 export const TOUR_STEPS = [
@@ -71,8 +73,8 @@ export const TOUR_STEPS = [
   {
     id: 'order-batch', target: 'order-batch', part: 1, tab: 'orders', modal: 'order', interactive: true,
     text: {
-      en: 'Adjust the batch here.',
-      tl: 'Pwede mong i-adjust ang batch dito.',
+      en: 'Adjust the batch here. Tap one of your recent batches, press ＋ New for the next batch number, or open More to browse batches that are still open. Finished batches stay tucked away, so the list never gets cluttered.',
+      tl: 'Pwede mong i-adjust ang batch dito. Pindutin ang isa sa mga kamakailang batch, pindutin ang ＋ New para sa susunod na batch number, o buksan ang More para makita ang mga batch na bukas pa. Nakatago ang mga tapos na, kaya hindi nagiging magulo ang listahan.',
     },
   },
   {
@@ -169,86 +171,124 @@ export const TOUR_STEPS = [
     },
   },
 
-  /* ---------- PART 3: WISHLIST TAB & MOVING ITEMS ---------- */
   {
-    id: 'tab-wishlist', target: 'tab-wishlist', part: 3, tab: 'orders', modal: null, sample: 'order',
+    id: 'batch-filter', target: 'batch-filter', part: 2, tab: 'orders', modal: null, sample: 'order',
+    text: {
+      en: 'Filter your orders by batch here. Tap a recent batch, or open More to browse the batches that are still open. Finished batches are folded away until you need them.',
+      tl: 'Dito mo mafi-filter ang orders ayon sa batch. Pindutin ang isang kamakailang batch, o buksan ang More para makita ang mga batch na bukas pa. Nakatago muna ang mga tapos na hanggang kailanganin mo.',
+    },
+  },
+
+  /* ---------- PART 3: ARCHIVE & RESTORE ---------- */
+  {
+    id: 'order-archive', target: 'order-archive', part: 3, tab: 'orders', modal: null, sample: 'order-delivered',
+    text: {
+      en: 'Once an order is marked Delivered, an Archive button appears on its row. Archiving moves it out of General Orders so your tracker stays tidy.',
+      tl: 'Kapag naka-mark na as Delivered ang order, may lalabas na Archive button sa row nito. Kapag ni-archive, aalis ito sa General Orders para hindi magulo ang tracker mo.',
+    },
+  },
+  {
+    id: 'archive-bulk', target: 'archive-bulk', part: 3, tab: 'orders', modal: null, sample: 'order-delivered',
+    text: {
+      en: 'Have lots of delivered orders? Click here to archive all the delivered orders currently shown in one go.',
+      tl: 'Maraming delivered orders? Pindutin ito para i-archive nang sabay-sabay ang lahat ng delivered orders na nakikita ngayon.',
+    },
+  },
+  {
+    id: 'tab-archive', target: 'tab-archive', part: 3, tab: 'archive', modal: null, sample: 'order-archived',
+    text: {
+      en: "Archived orders live here. They're no longer counted in your General Orders dashboard, but nothing is deleted.",
+      tl: 'Dito makikita ang mga na-archive na orders. Hindi na sila kasama sa dashboard ng General Orders, pero walang nabubura.',
+    },
+  },
+  {
+    id: 'archived-restore', target: 'archived-restore', part: 3, tab: 'archive', modal: null, sample: 'order-archived',
+    text: {
+      en: 'Changed your mind? Click Restore to send the order right back to its original spot in General Orders. Its info is added to the dashboard again.',
+      tl: 'Nagbago ang isip? Pindutin ang Restore para bumalik ang order sa dati nitong pwesto sa General Orders. Kasama na ulit ang info nito sa dashboard.',
+    },
+  },
+
+  /* ---------- PART 4: WISHLIST TAB & MOVING ITEMS ---------- */
+  {
+    id: 'tab-wishlist', target: 'tab-wishlist', part: 4, tab: 'orders', modal: null, sample: 'order',
     text: {
       en: 'Here you can log items that are on your wishlist. It helps you track how many items you are looking to check out, the cost, and if the items get cheaper.',
       tl: 'Dito, pwede mong ilista ang mga items na nasa wishlist mo. Makikita mo kung ilang items na ang gusto mong i-checkout, kung magkano, at kung mas nagmura ba sila.',
     },
   },
   {
-    id: 'add-wishlist-btn', target: 'add-btn', part: 3, tab: 'wishlist', modal: null,
+    id: 'add-wishlist-btn', target: 'add-btn', part: 4, tab: 'wishlist', modal: null,
     text: {
       en: 'Click here to add an item to your wishlist.',
       tl: 'Pindutin ito para magdagdag ng item sa iyong wishlist.',
     },
   },
   {
-    id: 'wl-name', target: 'wl-name', part: 3, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-name', target: 'wl-name', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: 'Put the name of the item here.',
       tl: 'Ilagay ang pangalan ng item dito.',
     },
   },
   {
-    id: 'wl-qty', target: 'wl-qty', part: 3, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-qty', target: 'wl-qty', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: 'Put the desired quantity of the item you want to check out.',
       tl: 'Ilagay dito kung ilang quantity ng item ang gusto mong i-checkout.',
     },
   },
   {
-    id: 'wl-initial', target: 'wl-initial', part: 3, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-initial', target: 'wl-initial', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: 'Enter the price of the item when you first saw it.',
       tl: 'Ilagay dito kung magkano ang item nung una mo itong nakita.',
     },
   },
   {
-    id: 'wl-latest', target: 'wl-latest', part: 3, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-latest', target: 'wl-latest', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: 'Enter the new price of the item after checking again with vouchers or promos applied. This can be left blank if there are no changes to the price.',
       tl: 'Ilagay dito kung magkano na ang item matapos i-check ulit nang may naka-apply na voucher o promo. Maaari itong hindi lagyan kung wala pang changes sa amount.',
     },
   },
   {
-    id: 'wl-add', target: 'wl-add', part: 3, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-add', target: 'wl-add', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: "Don't forget to add your entry!",
       tl: "'Wag kalimutang i-add ang entry mo!",
     },
   },
   {
-    id: 'wl-row', target: 'wl-row', part: 3, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-row', target: 'wl-row', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: 'This is your inputted wishlist item entry.',
       tl: 'Ito ang iyong ni-log na item.',
     },
   },
   {
-    id: 'wl-flag', target: 'wl-flag', part: 3, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-flag', target: 'wl-flag', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: 'If there is a change in the price of the item (like a price drop), it will show here.',
       tl: 'Kung may pagbabago sa presyo ng item, lalabas ito dito.',
     },
   },
   {
-    id: 'wl-edit', target: 'wl-edit', part: 3, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-edit', target: 'wl-edit', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: 'Edit any information from your wishlist item here.',
       tl: 'Pwedeng i-edit ang kahit anong information sa iyong wishlist item mula dito.',
     },
   },
   {
-    id: 'wl-move', target: 'wl-move', part: 3, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-move', target: 'wl-move', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: 'Once a wishlist item gets ordered, click Move to automatically transfer it to the general order tracker. If moved by mistake, click Undo to move it back.',
       tl: 'Pag ang wishlist item ay na-order na, pwedeng pindutin ang Move para malipat ang order mo sa general tracker. Kung namali ng pagkakalipat, pwedeng pindutin ang Undo para mabalik sa wishlist tracker.',
     },
   },
   {
-    id: 'wl-delete', target: 'wl-delete', part: 3, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-delete', target: 'wl-delete', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: "Delete any items that you've logged. Deleted items are permanently removed!",
       tl: 'Burahin ang items na ni-log. Ang mga item na dinelete ay permanente nang mawawala sa tracker!',
@@ -308,17 +348,6 @@ function measureTarget(el, interactive) {
   const r = el.getBoundingClientRect();
   let top = r.top, left = r.left, right = r.right, bottom = r.bottom;
 
-  if (interactive) {
-    el.querySelectorAll('*').forEach(child => {
-      const cr = child.getBoundingClientRect();
-      if (cr.width === 0 && cr.height === 0) return;
-      top = Math.min(top, cr.top);
-      left = Math.min(left, cr.left);
-      right = Math.max(right, cr.right);
-      bottom = Math.max(bottom, cr.bottom);
-    });
-  }
-
   // Don't highlight past the edge of a scrolling/clipping container
   // (e.g. table columns that are scrolled out of view horizontally).
   let p = el.parentElement;
@@ -332,6 +361,19 @@ function measureTarget(el, interactive) {
       bottom = Math.min(bottom, pr.bottom);
     }
     p = p.parentElement;
+  }
+
+  // Interactive steps also cover open dropdown panels (absolute/fixed children), otherwise the
+  // dim layer would swallow clicks on the options. These are NOT clipped by the ancestors above.
+  if (interactive) {
+    el.querySelectorAll('*').forEach(child => {
+      const cr = child.getBoundingClientRect();
+      if (cr.width === 0 && cr.height === 0) return;
+      top = Math.min(top, cr.top);
+      left = Math.min(left, cr.left);
+      right = Math.max(right, cr.right);
+      bottom = Math.max(bottom, cr.bottom);
+    });
   }
 
   const vw = document.documentElement.clientWidth;

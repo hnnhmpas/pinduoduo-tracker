@@ -7,6 +7,7 @@ import {
   TOUR_SAMPLE_ORDER_ID, TOUR_SAMPLE_WISHLIST_ID,
   FIRST_ORDER_ROW_STEP, FIRST_WISHLIST_ROW_STEP
 } from './Tour.jsx';
+import { BatchPicker, buildBatchInfo } from './BatchPicker.jsx';
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
@@ -157,6 +158,11 @@ export default function App() {
   // PAGINATION STATES FOR WISHLIST
   const [wishlistPage, setWishlistPage] = useState(1);
   const [wishlistPerPage, setWishlistPerPage] = useState(10);
+
+  // PAGINATION STATES FOR ARCHIVE + UNDO TOAST FOR ARCHIVING
+  const [archivePage, setArchivePage] = useState(1);
+  const [archivePerPage, setArchivePerPage] = useState(10);
+  const [lastArchive, setLastArchive] = useState(null);
 
   // MODAL STATES
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
@@ -345,7 +351,7 @@ export default function App() {
       qty: 1,
       cost: '',
       date: new Date().toISOString().split('T')[0],
-      batch: selectedBatch === 'All Batches' ? 'Batch 1' : selectedBatch,
+      batch: selectedBatch === 'All Batches' ? getLatestOrderBatch() : selectedBatch,
       shippingStatus: 'Ordered',
       orderStatus: '',
       notes: '',
@@ -547,6 +553,41 @@ export default function App() {
     setEditingWishlistItem(null);
   };
 
+  // ARCHIVE (manual only): flips a flag on the SAME document, so nothing else about the order changes.
+  // Because the doc id never changes, a restored order lands in exactly the same spot (same batch, same row order).
+  const archiveOrders = async (list) => {
+    const targets = list.filter(o => o.shippingStatus === 'Delivered' && !o.archived && !o.isTutorialSample);
+    if (targets.length === 0) return;
+    try {
+      for (const o of targets) {
+        await setDoc(doc(db, "users", user.uid, "pdd_orders", String(o.id)), { archived: true }, { merge: true });
+      }
+      const ids = targets.map(o => String(o.id));
+      setSelectedOrderIds(prev => prev.filter(id => !ids.includes(String(id))));
+      setLastArchive({ ids });
+    } catch (error) {
+      console.error("Error archiving orders: ", error);
+      alert('Failed to archive. Check console for details.');
+    }
+  };
+
+  const restoreOrders = async (ids) => {
+    try {
+      for (const id of ids) {
+        await setDoc(doc(db, "users", user.uid, "pdd_orders", String(id)), { archived: false }, { merge: true });
+      }
+    } catch (error) {
+      console.error("Error restoring orders: ", error);
+      alert('Failed to restore. Check console for details.');
+    }
+  };
+
+  const handleUndoArchive = async () => {
+    if (!lastArchive) return;
+    await restoreOrders(lastArchive.ids);
+    setLastArchive(null);
+  };
+
   // SMART BATCH: the batch of the most recently added order (falls back to Batch 1)
   const getLatestOrderBatch = () => {
     let latest = null;
@@ -563,6 +604,8 @@ export default function App() {
   };
 
   const latestOrderBatch = getLatestOrderBatch();
+  // Every batch that exists on a real order (archived included), with open/finished status
+  const batchInfo = buildBatchInfo(orders);
   const effectiveMoveBatch = wishlistMoveBatch || latestOrderBatch;
 
   // Move one or many wishlist items into General Orders (stays on the Wishlist tab)
@@ -629,7 +672,12 @@ export default function App() {
   };
 
   // Tour sample rows are merged in for DISPLAY ONLY - they never enter `orders` / `wishlist` or Firebase.
-  const ordersForView = tourSampleOrder ? [tourSampleOrder, ...orders] : orders;
+  // Archived orders are kept out of the General Orders table AND its dashboard; they live in the Archive tab.
+  const activeOrders = orders.filter(o => !o.archived);
+  const archivedOrders = orders.filter(o => o.archived);
+  // (a tour sample can be shown as a normal row, a delivered row, or an already-archived row)
+  const ordersForView = tourSampleOrder && !tourSampleOrder.archived ? [tourSampleOrder, ...activeOrders] : activeOrders;
+  const archivedForView = tourSampleOrder && tourSampleOrder.archived ? [tourSampleOrder, ...archivedOrders] : archivedOrders;
   const wishlistForView = tourSampleWishlist ? [tourSampleWishlist, ...wishlist] : wishlist;
 
   const query = searchQuery.trim().toLowerCase();
@@ -649,7 +697,8 @@ export default function App() {
     : wishlistForView;
 
   const allEntries = [
-    ...orders.map(o => ({ name: o.name, type: 'Order', tab: 'orders' })),
+    ...activeOrders.map(o => ({ name: o.name, type: 'Order', tab: 'orders' })),
+    ...archivedOrders.map(o => ({ name: o.name, type: 'Archived', tab: 'archive' })),
     ...wishlist.map(w => ({ name: w.name, type: 'Wishlist', tab: 'wishlist' }))
   ];
 
@@ -669,10 +718,19 @@ export default function App() {
     wishlistPage * wishlistPerPage
   );
 
+  const finalFilteredArchive = query
+    ? archivedForView.filter(o => o.name.toLowerCase().includes(query))
+    : archivedForView;
+  const totalArchivePages = Math.ceil(finalFilteredArchive.length / archivePerPage) || 1;
+  const currentArchiveSlice = finalFilteredArchive.slice(
+    (archivePage - 1) * archivePerPage,
+    archivePage * archivePerPage
+  );
+  const deliveredInView = finalFilteredOrders.filter(o => o.shippingStatus === 'Delivered');
+
   const wishlistInitialTotal = wishlistForView.reduce((acc, item) => acc + (item.qty * item.initialCost), 0);
   const wishlistLatestTotal = wishlistForView.reduce((acc, item) => acc + (item.qty * item.latestCost), 0);
 
-  const batchOptions = ['All Batches', ...Array.from({ length: 25 }, (_, i) => `Batch ${i + 1}`)];
   const shippingStatusOptions = [
     'Ordered',
     'At China Warehouse',
@@ -692,6 +750,7 @@ export default function App() {
     const list = batchFilteredOrders.filter(o => o.shippingStatus === status);
     return { entries: list.length, pcs: list.reduce((acc, o) => acc + (Number(o.qty) || 0), 0) };
   };
+  const chinaCustomsStats = statusStats('Dispatched / China Customs');
   const inTransitStats = statusStats('In Transit to PH');
   const phCustomsStats = statusStats('PH Customs Clearance');
   const phHubStats = statusStats('PH Hub / Out for Local Delivery');
@@ -765,6 +824,10 @@ export default function App() {
   // =====================================================================
   // ONBOARDING TOUR LOGIC
   // =====================================================================
+  // Keep page numbers valid when archiving / restoring shrinks or grows a list
+  useEffect(() => { if (ordersPage > totalOrdersPages) setOrdersPage(totalOrdersPages); }, [ordersPage, totalOrdersPages]);
+  useEffect(() => { if (archivePage > totalArchivePages) setArchivePage(totalArchivePages); }, [archivePage, totalArchivePages]);
+
   const resetTourDropdowns = () => {
     setModalBatchOpen(false);
     setModalShippingOpen(false);
@@ -901,13 +964,16 @@ export default function App() {
   // Which row do the row-level steps point at? A real entry made during the tour, else the sample.
   const realTourOrderExists = !!tourRealOrderId && orders.some(o => o.id === tourRealOrderId);
   const realTourWishlistExists = !!tourRealWishlistId && wishlist.some(w => w.id === tourRealWishlistId);
+  const tourStepSample = tourPhase === 'running' ? TOUR_STEPS[tourStepIndex].sample : null;
+  // The delivered/archived demo steps always use the sample; plain row steps prefer a real order made in the tour.
   const tourOrderTargetId = tourPhase === 'running'
-    ? (realTourOrderExists ? tourRealOrderId : (tourSampleOrder ? tourSampleOrder.id : null))
+    ? ((tourStepSample === 'order' && realTourOrderExists) ? tourRealOrderId : (tourSampleOrder ? tourSampleOrder.id : null))
     : null;
   const tourWishlistTargetId = tourPhase === 'running'
     ? (realTourWishlistExists ? tourRealWishlistId : (tourSampleWishlist ? tourSampleWishlist.id : null))
     : null;
   const ttO = (order, name) => (tourOrderTargetId && order.id === tourOrderTargetId ? { 'data-tour': name } : {});
+  const ttS = (order, name) => (tourPhase === 'running' && order.isTutorialSample ? { 'data-tour': name } : {});
   const ttW = (item, name) => (tourWishlistTargetId && item.id === tourWishlistTargetId ? { 'data-tour': name } : {});
 
   // 3) Inject / remove the temporary sample rows (local state only)
@@ -920,13 +986,26 @@ export default function App() {
     const step = TOUR_STEPS[tourStepIndex];
     const today = new Date().toISOString().split('T')[0];
 
-    setTourSampleOrder(prev => (step.sample === 'order' && !realTourOrderExists)
-      ? (prev || {
-          id: TOUR_SAMPLE_ORDER_ID, name: 'Sample: Minimalist Rug', qty: 2, cost: 150, date: today,
-          batch: 'Batch 1', shippingStatus: 'Ordered', orderStatus: '', notes: 'Tutorial sample',
-          actualDeliveryDate: '', estDelivery: calculateEstDelivery(today), isTutorialSample: true
-        })
-      : null);
+    const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]; };
+    const orderKind = step.sample && step.sample.startsWith('order') ? step.sample : null;
+    const showOrderSample = orderKind && (orderKind !== 'order' || !realTourOrderExists);
+
+    setTourSampleOrder(prev => {
+      if (!showOrderSample) return null;
+      if (prev && prev.kind === orderKind) return prev;
+      const base = {
+        id: TOUR_SAMPLE_ORDER_ID, kind: orderKind, name: 'Sample: Minimalist Rug', qty: 2, cost: 150,
+        batch: 'Batch 1', notes: 'Tutorial sample', isTutorialSample: true
+      };
+      if (orderKind === 'order') {
+        return { ...base, date: today, shippingStatus: 'Ordered', orderStatus: '', actualDeliveryDate: '', estDelivery: calculateEstDelivery(today) };
+      }
+      const ordered = daysAgo(30);
+      return {
+        ...base, date: ordered, shippingStatus: 'Delivered', orderStatus: 'OK ✔', actualDeliveryDate: daysAgo(2),
+        estDelivery: calculateEstDelivery(ordered), archived: orderKind === 'order-archived'
+      };
+    });
 
     setTourSampleWishlist(prev => (step.sample === 'wishlist' && !realTourWishlistExists)
       ? (prev || {
@@ -966,7 +1045,7 @@ export default function App() {
     prevTourModalRef.current = step.modal;
 
     // Tick the target row's checkbox so the Batch Edit button appears (and untick it afterwards)
-    const orderTargetId = realTourOrderExists ? tourRealOrderId : TOUR_SAMPLE_ORDER_ID;
+    const orderTargetId = (step.sample === 'order' && realTourOrderExists) ? tourRealOrderId : TOUR_SAMPLE_ORDER_ID;
     setSelectedOrderIds(step.checkRow ? [orderTargetId] : []);
     setSelectedWishlistIds([]);
 
@@ -975,6 +1054,8 @@ export default function App() {
       const idx = realTourOrderExists ? finalFilteredOrders.findIndex(o => o.id === tourRealOrderId) : 0;
       setOrdersPage(idx >= 0 ? Math.floor(idx / ordersPerPage) + 1 : 1);
     }
+    if (step.sample === 'order-delivered') setOrdersPage(1);
+    if (step.sample === 'order-archived') setArchivePage(1);
     if (step.sample === 'wishlist') {
       const idx = realTourWishlistExists ? finalFilteredWishlist.findIndex(w => w.id === tourRealWishlistId) : 0;
       setWishlistPage(idx >= 0 ? Math.floor(idx / wishlistPerPage) + 1 : 1);
@@ -1119,7 +1200,8 @@ export default function App() {
                       key={idx}
                       onClick={() => {
                         setSearchQuery(item.name);
-                        setActiveTab(item.tab === 'wishlist' ? 'wishlist' : 'orders');
+                        setActiveTab(item.tab);
+                        setArchivePage(1);
                         setOrdersPage(1);
                         setWishlistPage(1);
                       }}
@@ -1154,7 +1236,7 @@ export default function App() {
             <button 
               data-tour="add-btn"
               onClick={activeTab === 'wishlist' ? handleOpenAddWishlist : handleOpenAddOrder}
-              style={getButtonStyle('pink')}
+              style={activeTab === 'archive' ? { display: 'none' } : getButtonStyle('pink')}
             >
               {activeTab === 'wishlist' ? 'Add Wishlist Item' : 'Add Order'}
             </button>
@@ -1252,7 +1334,7 @@ export default function App() {
               onClick={() => setActiveTab('orders')}
               style={getButtonStyle(activeTab === 'orders' ? 'primary' : 'light')}
             >
-              General Orders ({orders.length})
+              General Orders ({activeOrders.length})
             </button>
             <button
               data-tour="tab-wishlist"
@@ -1261,75 +1343,26 @@ export default function App() {
             >
               Wishlist ({wishlist.length})
             </button>
+            <button
+              data-tour="tab-archive"
+              onClick={() => setActiveTab('archive')}
+              style={getButtonStyle(activeTab === 'archive' ? 'primary' : 'light')}
+            >
+              🗄️ Archive ({archivedOrders.length})
+            </button>
           </div>
 
           {activeTab === 'orders' && (
             <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ position: 'relative' }} ref={dropdownRef}>
-                <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '2px' }}>BATCH FILTER</span>
-                
-                <button
-                  onClick={() => setIsBatchDropdownOpen(prev => !prev)}
-                  style={getButtonStyle('light')}
-                >
-                  {selectedBatch}
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', marginLeft: '4px' }}>{isBatchDropdownOpen ? '▲' : '▼'}</span>
-                </button>
-
-                {isBatchDropdownOpen && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '105%',
-                    right: 0,
-                    width: '170px',
-                    maxHeight: '220px',
-                    overflowY: 'auto',
-                    background: '#fffdfa',
-                    border: '1px solid #e6ccb2',
-                    borderRadius: '14px',
-                    boxShadow: '0 8px 25px rgba(230, 204, 178, 0.5)',
-                    zIndex: 200,
-                    padding: '6px',
-                    boxSizing: 'border-box'
-                  }}>
-                    {batchOptions.map((batch) => {
-                      const isSelected = selectedBatch === batch;
-                      return (
-                        <div
-                          key={batch}
-                          onClick={() => {
-                            setSelectedBatch(batch);
-                            setOrdersPage(1);
-                            setIsBatchDropdownOpen(false);
-                          }}
-                          style={{
-                            padding: '8px 10px',
-                            fontSize: '12px',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            fontWeight: isSelected ? '700' : '500',
-                            color: isSelected ? '#5c4033' : '#7f5539',
-                            background: isSelected ? '#ffd166' : 'transparent',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            marginBottom: '2px',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = '#fcf6f0';
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = 'transparent';
-                          }}
-                        >
-                          <span>{batch === 'All Batches' ? 'All Batches' : `${batch}`}</span>
-                          {isSelected && <span style={{ fontSize: '10px' }}>✔</span>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+              <div data-tour="batch-filter">
+                <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px' }}>BATCH FILTER</span>
+                <BatchPicker
+                  value={selectedBatch}
+                  onChange={(b) => { setSelectedBatch(b); setOrdersPage(1); }}
+                  batches={batchInfo}
+                  extras={[{ value: 'All Batches', label: 'All Batches' }]}
+                  allowCreate={false}
+                />
               </div>
             </div>
           )}
@@ -1361,6 +1394,11 @@ export default function App() {
                 <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
                   <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>DELIVERED</span>
                   <strong style={{ fontSize: '16px', color: '#2d6a4f' }}>{deliveredCount}</strong>
+                </div>
+                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>IN CHINA CUSTOMS</span>
+                  <strong style={{ fontSize: '16px', color: '#3a6ea5' }}>{chinaCustomsStats.entries}</strong>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', marginTop: '2px' }}>{chinaCustomsStats.pcs} pcs</span>
                 </div>
                 <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
                   <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>IN TRANSIT TO PH</span>
@@ -1401,11 +1439,21 @@ export default function App() {
                     ✏️ Batch Edit Selected ({selectedOrderIds.length})
                   </button>
                 )}
+                {deliveredInView.length > 0 && (
+                  <button
+                    data-tour="archive-bulk"
+                    onClick={() => archiveOrders(deliveredInView)}
+                    style={getButtonStyle('blue')}
+                    title="Move every delivered order shown here into the Archive"
+                  >
+                    🗄️ Archive Delivered ({deliveredInView.length})
+                  </button>
+                )}
                 <span style={{ fontSize: '11px', color: '#8c7a6b', fontWeight: '600' }}>Showing {finalFilteredOrders.length} orders found</span>
               </div>
             </div>
 
-            <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1350px' }}>
+            <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1500px' }}>
               <colgroup>
                 <col style={{ width: '4%' }} />
                 <col style={{ width: '13%' }} />
@@ -1420,7 +1468,7 @@ export default function App() {
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '8%' }} />
-                <col style={{ width: '7%' }} />
+                <col style={{ width: '12%' }} />
               </colgroup>
               <thead>
                 <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
@@ -1550,7 +1598,7 @@ export default function App() {
                           </span>
                         </td>
                         <td>
-                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
                             <button 
                               style={getButtonStyle('pink')}
                               {...ttO(order, 'order-edit')}
@@ -1558,6 +1606,16 @@ export default function App() {
                             >
                               Edit
                             </button>
+                            {order.shippingStatus === 'Delivered' && (
+                              <button
+                                {...ttO(order, 'order-archive')}
+                                style={getButtonStyle('blue')}
+                                onClick={() => archiveOrders([order])}
+                                title="Move this delivered order to the Archive"
+                              >
+                                🗄️ Archive
+                              </button>
+                            )}
                             <button 
                               style={getButtonStyle('danger')}
                               {...ttO(order, 'order-delete')}
@@ -1576,6 +1634,103 @@ export default function App() {
 
             {renderPagination(ordersPage, totalOrdersPages, setOrdersPage, ordersPerPage, setOrdersPerPage)}
           </div>
+        </div>
+      )}
+
+      {/* --- TAB 3: ARCHIVE --- */}
+      {activeTab === 'archive' && (
+        <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
+              🗄️ Archived Orders {query && `(Filtered by "${searchQuery}")`}
+            </h2>
+            <span style={{ fontSize: '11px', color: '#8c7a6b', fontWeight: '600' }}>
+              {finalFilteredArchive.length} archived · not counted in the General Orders dashboard
+            </span>
+          </div>
+
+          <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1250px' }}>
+            <colgroup>
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '16%' }} />
+            </colgroup>
+            <thead>
+              <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
+                <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>Item Name</th>
+                <th style={{ fontWeight: 'bold' }}>Quantity</th>
+                <th style={{ fontWeight: 'bold' }}>Cost</th>
+                <th style={{ fontWeight: 'bold' }}>Total Cost</th>
+                <th style={{ fontWeight: 'bold' }}>Date Ordered</th>
+                <th style={{ fontWeight: 'bold' }}>Batch</th>
+                <th style={{ fontWeight: 'bold' }}>Order Status</th>
+                <th style={{ fontWeight: 'bold' }}>Actual Delivery</th>
+                <th style={{ fontWeight: 'bold' }}>Shipping Days</th>
+                <th style={{ borderRadius: '0 8px 8px 0', fontWeight: 'bold' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentArchiveSlice.length === 0 ? (
+                <tr>
+                  <td colSpan="10" style={{ textAlign: 'center', padding: '35px', color: '#b0a499' }}>
+                    {archivedOrders.length === 0 ? 'Nothing archived yet. Delivered orders can be archived from General Orders.' : 'No matching archived orders found.'}
+                  </td>
+                </tr>
+              ) : (
+                currentArchiveSlice.map((order) => {
+                  const actualDays = calculateActualShippingDays(order.date, order.actualDeliveryDate);
+                  return (
+                    <tr key={order.id} style={{ borderBottom: '1px solid #fcf6f0' }}>
+                      <td style={{ padding: '12px 8px', color: '#5c4033', wordBreak: 'break-word' }}>{order.name}{order.isTutorialSample && <SampleBadge />}</td>
+                      <td>{order.qty}</td>
+                      <td>₱{Number(order.cost).toFixed(2)}</td>
+                      <td style={{ color: '#bc6c25', fontWeight: 'bold' }}>₱{(order.qty * order.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td>{order.date}</td>
+                      <td>
+                        <span style={{ background: '#ffd166', color: '#5c4033', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
+                          {order.batch || 'Unassigned'}
+                        </span>
+                      </td>
+                      <td>
+                        {order.orderStatus ? (
+                          <span style={{ background: order.orderStatus === 'OK ✔' ? '#d8f3dc' : '#ffccd5', color: order.orderStatus === 'OK ✔' ? '#1b4332' : '#780000', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold' }}>
+                            {order.orderStatus}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#b0a499', fontSize: '11px' }}>-</span>
+                        )}
+                      </td>
+                      <td style={{ color: order.actualDeliveryDate ? '#5c4033' : '#b0a499' }}>{order.actualDeliveryDate || '-'}</td>
+                      <td>
+                        <span style={{ background: actualDays !== null ? '#d8f3dc' : '#fcf6f0', color: actualDays !== null ? '#1b4332' : '#b0a499', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px' }}>
+                          {actualDays !== null ? `${actualDays} days` : '-'}
+                        </span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                          <button {...ttS(order, 'archived-restore')} style={getButtonStyle('light')} onClick={() => restoreOrders([order.id])} title="Put this order back in General Orders exactly where it was">
+                            ↩ Restore
+                          </button>
+                          <button style={getButtonStyle('danger')} onClick={() => handleDeleteOrder(order)}>
+                            🗑️
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+
+          {renderPagination(archivePage, totalArchivePages, setArchivePage, archivePerPage, setArchivePerPage)}
         </div>
       )}
 
@@ -1616,36 +1771,15 @@ export default function App() {
               </h2>
             
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                <div style={{ position: 'relative' }} ref={wishlistMoveRef}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '2px' }}>MOVE TO BATCH</span>
-                  <button
-                    onClick={() => setWishlistMoveBatchOpen(prev => !prev)}
-                    style={getButtonStyle('light')}
-                    title="Batch that moved items will be placed in"
-                  >
-                    {effectiveMoveBatch}{wishlistMoveBatch === null ? ' (auto)' : ''}
-                    <span style={{ fontSize: '10px', color: '#8c7a6b', marginLeft: '4px' }}>{wishlistMoveBatchOpen ? '▲' : '▼'}</span>
-                  </button>
-
-                  {wishlistMoveBatchOpen && (
-                    <div style={{ position: 'absolute', top: '105%', right: 0, width: '210px', maxHeight: '240px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '14px', boxShadow: '0 8px 25px rgba(230, 204, 178, 0.5)', zIndex: 200, padding: '6px', boxSizing: 'border-box' }}>
-                      <div
-                        onClick={() => { setWishlistMoveBatch(null); setWishlistMoveBatchOpen(false); }}
-                        style={{ padding: '8px 10px', fontSize: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: wishlistMoveBatch === null ? '700' : '500', color: '#5c4033', background: wishlistMoveBatch === null ? '#ffd166' : 'transparent', marginBottom: '2px' }}
-                      >
-                        ✨ Auto (latest used: {latestOrderBatch})
-                      </div>
-                      {Array.from({ length: 25 }, (_, i) => `Batch ${i + 1}`).map(b => (
-                        <div
-                          key={b}
-                          onClick={() => { setWishlistMoveBatch(b); setWishlistMoveBatchOpen(false); }}
-                          style={{ padding: '8px 10px', fontSize: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: wishlistMoveBatch === b ? '700' : '500', color: '#5c4033', background: wishlistMoveBatch === b ? '#ffd166' : 'transparent', marginBottom: '2px' }}
-                        >
-                          {b}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                <div>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px' }}>MOVE TO BATCH</span>
+                  <BatchPicker
+                    value={wishlistMoveBatch}
+                    onChange={setWishlistMoveBatch}
+                    batches={batchInfo}
+                    extras={[{ value: null, label: `✨ Auto (${latestOrderBatch})` }]}
+                    compact
+                  />
                 </div>
 
                 {selectedWishlistIds.length > 0 && (
@@ -1910,34 +2044,20 @@ export default function App() {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '0.8fr 1.4fr', gap: '10px', alignItems: 'start' }}>
                 <div data-tour="order-date">
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Date Ordered</label>
                   <input type="date" name="date" value={orderFormData.date} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
                 </div>
 
-                <div data-tour="order-batch" style={{ position: 'relative' }}>
+                <div data-tour="order-batch">
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Batch</label>
-                  <div 
-                    onClick={() => setModalBatchOpen(!modalBatchOpen)}
-                    style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                  >
-                    <span>{orderFormData.batch || 'Batch 1'}</span>
-                    <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{modalBatchOpen ? '▲' : '▼'}</span>
-                  </div>
-                  {modalBatchOpen && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '150px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
-                      {Array.from({ length: 25 }, (_, i) => `Batch ${i + 1}`).map(b => (
-                        <div 
-                          key={b}
-                          onClick={() => { setOrderFormData(prev => ({ ...prev, batch: b })); setModalBatchOpen(false); }}
-                          style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: orderFormData.batch === b ? '#ffd166' : 'transparent', fontWeight: orderFormData.batch === b ? 'bold' : 'normal', color: '#5c4033' }}
-                        >
-                          {b}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <BatchPicker
+                    value={orderFormData.batch}
+                    onChange={(b) => setOrderFormData(prev => ({ ...prev, batch: b }))}
+                    batches={batchInfo}
+                    compact
+                  />
                 </div>
               </div>
 
@@ -2036,28 +2156,15 @@ export default function App() {
               </p>
 
               {/* Target Batch Selection */}
-              <div style={{ position: 'relative' }}>
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Batch</label>
-                <div 
-                  onClick={() => setBatchEditBatchDropdownOpen(!batchEditBatchDropdownOpen)}
-                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                >
-                  <span>{batchEditTargetBatch === KEEP ? '-- Keep current --' : batchEditTargetBatch}</span>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditBatchDropdownOpen ? '▲' : '▼'}</span>
-                </div>
-                {batchEditBatchDropdownOpen && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '150px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
-                    {[KEEP, ...Array.from({ length: 25 }, (_, i) => `Batch ${i + 1}`)].map(b => (
-                      <div 
-                        key={b}
-                        onClick={() => { setBatchEditTargetBatch(b); setBatchEditBatchDropdownOpen(false); }}
-                        style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetBatch === b ? '#ffd166' : 'transparent', fontWeight: batchEditTargetBatch === b ? 'bold' : 'normal', color: '#5c4033' }}
-                      >
-                        {b === KEEP ? '-- Keep current --' : b}
-                      </div>
-                    ))}
-                  </div>
-                )}
+              <div>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '4px', color: '#7f5539' }}>Batch</label>
+                <BatchPicker
+                  value={batchEditTargetBatch}
+                  onChange={setBatchEditTargetBatch}
+                  batches={batchInfo}
+                  extras={[{ value: KEEP, label: 'Keep current' }]}
+                  compact
+                />
               </div>
 
               {/* Target Shipping Status Selection */}
@@ -2143,6 +2250,21 @@ export default function App() {
           <button onClick={handleUndoMove} style={getButtonStyle('blue')}>↩ Undo</button>
           <button
             onClick={() => setLastMove(null)}
+            style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '26px', height: '26px', fontSize: '11px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            title="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* --- UNDO TOAST (after archiving delivered orders) --- */}
+      {lastArchive && (
+        <div style={{ position: 'fixed', bottom: lastMove ? '88px' : '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 1500, background: '#fffdfa', border: '1px solid #e6ccb2', borderTop: '4px solid #bde0fe', borderRadius: '16px', padding: '12px 16px', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.6)', display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '92vw', boxSizing: 'border-box', fontSize: '12px', color: '#5c4033', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <span>🗄️ Archived {lastArchive.ids.length} {lastArchive.ids.length === 1 ? 'order' : 'orders'}.</span>
+          <button onClick={handleUndoArchive} style={getButtonStyle('blue')}>↩ Undo</button>
+          <button
+            onClick={() => setLastArchive(null)}
             style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '26px', height: '26px', fontSize: '11px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title="Dismiss"
           >
