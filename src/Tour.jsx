@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
+import { ShoppingBag, Lightbulb } from 'lucide-react';
 
 /* =====================================================================
    ONBOARDING TOUR  —  steps, copy, spotlight overlay and welcome modal
@@ -73,8 +74,8 @@ export const TOUR_STEPS = [
   {
     id: 'order-batch', target: 'order-batch', part: 1, tab: 'orders', modal: 'order', interactive: true,
     text: {
-      en: 'Adjust the batch here. Tap one of your recent batches, press ＋ New for the next batch number, or open More to browse batches that are still open. Finished batches stay tucked away, so the list never gets cluttered.',
-      tl: 'Pwede mong i-adjust ang batch dito. Pindutin ang isa sa mga kamakailang batch, pindutin ang ＋ New para sa susunod na batch number, o buksan ang More para makita ang mga batch na bukas pa. Nakatago ang mga tapos na, kaya hindi nagiging magulo ang listahan.',
+      en: 'Adjust the batch here. Tap one of your recent batches, press + New for the next batch number, or open More to browse batches that are still open. Finished batches stay tucked away, so the list never gets cluttered.',
+      tl: 'Pwede mong i-adjust ang batch dito. Pindutin ang isa sa mga kamakailang batch, pindutin ang + New para sa susunod na batch number, o buksan ang More para makita ang mga batch na bukas pa. Nakatago ang mga tapos na, kaya hindi nagiging magulo ang listahan.',
     },
   },
   {
@@ -307,11 +308,11 @@ export const FIRST_WISHLIST_ROW_STEP = TOUR_STEPS.findIndex(s => s.id === 'wl-ro
 const UI = {
   en: {
     step: (n, t) => `Step ${n} of ${t}`,
-    tryIt: '💡 Feel free to type here — or just press Next to keep going.',
+    tryIt: 'Feel free to type here — or just press Next to keep going.',
   },
   tl: {
     step: (n, t) => `Step ${n} of ${t}`,
-    tryIt: '💡 Pwede kang mag-type dito — o pindutin lang ang Next para magpatuloy.',
+    tryIt: 'Pwede kang mag-type dito — o pindutin lang ang Next para magpatuloy.',
   },
 };
 
@@ -450,7 +451,7 @@ export function TourWelcome({ onPick, onSkip }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 4000, background: 'rgba(60, 40, 30, 0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '15px', boxSizing: 'border-box' }}>
       <div role="dialog" aria-modal="true" style={{ background: C.cream, borderRadius: '20px', padding: '28px 26px 24px', maxWidth: '420px', width: '100%', boxShadow: '0 15px 40px rgba(230, 204, 178, 0.6)', borderTop: `6px solid ${C.yellow}`, border: `1px solid ${C.border}`, boxSizing: 'border-box', textAlign: 'center', fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif", letterSpacing: 'normal' }}>
-        <div style={{ fontSize: '34px', marginBottom: '6px' }}>🧀</div>
+        <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'center', color: C.brownSoft }}><ShoppingBag size={34} /></div>
         <div style={{ fontSize: '19px', fontWeight: 700, color: C.brownSoft, marginBottom: '6px' }}>
           Welcome! / Maligayang pagdating!
         </div>
@@ -569,7 +570,7 @@ export function TourOverlay({ stepIndex, lang, onLang, onNext, onBack, onSkip })
         <div style={{ fontSize: '13.5px', lineHeight: 1.55, color: C.brown }}>{step.text[lang]}</div>
 
         {step.interactive && (
-          <div style={{ fontSize: '11px', color: C.muted, marginTop: '8px', lineHeight: 1.45 }}>{ui.tryIt}</div>
+          <div style={{ fontSize: '11px', color: C.muted, marginTop: '8px', lineHeight: 1.45, display: 'flex', gap: '6px', alignItems: 'flex-start' }}><Lightbulb size={13} style={{ flexShrink: 0, marginTop: '1px' }} /><span>{ui.tryIt}</span></div>
         )}
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', gap: '8px' }}>

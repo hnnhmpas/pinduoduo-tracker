@@ -1,13 +1,14 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Plus, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
 
 /* =====================================================================
    BATCH PICKER  —  replaces the fixed 25-item batch dropdowns
    ---------------------------------------------------------------------
-   Layout:   [extras…] [recent batch chips…] [＋ New (next #)] [More ▾]
-   "More ▾"  opens a small panel:
-               • "Go to / create batch #" box (any number)
-               • OPEN batches      – still have undelivered orders
-               • FINISHED batches  – everything delivered / archived,
+   Layout:   [extras…] [recent batch chips…] [+ New (next #)] [More]
+   "More"  opens a small panel:
+               - "Go to / create batch #" box (any number)
+               - OPEN batches      – still have undelivered orders
+               - FINISHED batches  – everything delivered / archived,
                                      folded away until you ask for them
    Batches are never pre-listed: they exist because orders use them, so
    there is no cap and the list only grows with batches that matter.
@@ -81,7 +82,7 @@ export function BatchPicker({
   if (value != null && !chips.some((c) => c.value === value)) {
     // A batch picked via "More" (or a brand-new one) – show it as a chip so the choice is always visible
     const isNew = !byName.has(value);
-    chips.splice(extras.length, 0, { key: `sel:${value}`, value, text: `${label(value)}${isNew ? ' ✨new' : ''}` });
+    chips.splice(extras.length, 0, { key: `sel:${value}`, value, text: isNew ? <>{label(value)}<span style={{ marginLeft: '5px', fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', opacity: 0.75 }}>new</span></> : label(value) });
   }
 
   const chipStyle = (selected, kind) => ({
@@ -97,6 +98,9 @@ export function BatchPicker({
     letterSpacing: 'normal',
     lineHeight: 1.2,
     whiteSpace: 'nowrap',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
     boxShadow: selected ? '0 2px 0 rgba(199, 175, 150, 0.4)' : 'none',
   });
 
@@ -196,12 +200,12 @@ export function BatchPicker({
 
       {allowCreate && (
         <button type="button" onClick={() => onChange(`Batch ${nextNum}`)} title={`Start a new batch: Batch ${nextNum}`} style={chipStyle(false, 'new')}>
-          ＋ New ({nextNum})
+          <Plus size={12} strokeWidth={3} /> New ({nextNum})
         </button>
       )}
 
       <button ref={moreRef} type="button" onClick={toggleOpen} aria-expanded={open} style={chipStyle(false, 'more')}>
-        More {open ? '▲' : '▾'}
+        More {open ? <ChevronUp size={12} strokeWidth={3} /> : <ChevronDown size={12} strokeWidth={3} />}
       </button>
 
       {open && pos && (
@@ -252,9 +256,9 @@ export function BatchPicker({
               <button
                 type="button"
                 onClick={() => setShowFinished((s) => !s)}
-                style={{ display: 'block', width: '100%', textAlign: 'left', marginTop: '6px', padding: '7px 9px', borderRadius: '8px', border: 'none', background: 'transparent', color: C.muted, fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'normal' }}
+                style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%', textAlign: 'left', marginTop: '6px', padding: '7px 9px', borderRadius: '8px', border: 'none', background: 'transparent', color: C.muted, fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'normal' }}
               >
-                {showFinished ? '▾' : '▸'} {showFinished ? 'Hide' : 'Show'} {finishedList.length} finished {finishedList.length === 1 ? 'batch' : 'batches'}…
+                {showFinished ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {showFinished ? 'Hide' : 'Show'} {finishedList.length} finished {finishedList.length === 1 ? 'batch' : 'batches'}…
               </button>
               {showFinished && finishedList.map((b) => row(b, false))}
             </>

@@ -8,6 +8,11 @@ import {
   FIRST_ORDER_ROW_STEP, FIRST_WISHLIST_ROW_STEP
 } from './Tour.jsx';
 import { BatchPicker, buildBatchInfo } from './BatchPicker.jsx';
+import {
+  ShoppingBag, LogIn, Search, X, BookOpen, Truck, Archive, ArchiveRestore, Undo2,
+  LayoutDashboard, Package, Heart, Pencil, Trash2, Check, ArrowDown, ArrowUp, ArrowRight,
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight
+} from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
@@ -317,13 +322,13 @@ export default function App() {
     if (diff > 0) {
       return (
         <span style={{ background: '#d8f3dc', color: '#1b4332', padding: '4px 10px', borderRadius: '9999px', fontWeight: 'bold', fontSize: '11px', whiteSpace: 'nowrap', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
-          ↓ ₱{diff.toFixed(2)} SAVED!
+          <ArrowDown size={12} strokeWidth={3} style={{ verticalAlign: '-2px', marginRight: '3px' }} />₱{diff.toFixed(2)} SAVED!
         </span>
       );
     } else if (diff < 0) {
       return (
         <span style={{ background: '#ffccd5', color: '#780000', padding: '4px 10px', borderRadius: '9999px', fontWeight: 'bold', fontSize: '11px', whiteSpace: 'nowrap', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
-          ↑ ₱{Math.abs(diff).toFixed(2)} INCREASE!
+          <ArrowUp size={12} strokeWidth={3} style={{ verticalAlign: '-2px', marginRight: '3px' }} />₱{Math.abs(diff).toFixed(2)} INCREASE!
         </span>
       );
     }
@@ -369,7 +374,7 @@ export default function App() {
       date: order.date,
       batch: order.batch || 'Batch 1',
       shippingStatus: order.shippingStatus || 'Ordered',
-      orderStatus: order.orderStatus || '',
+      orderStatus: order.orderStatus === 'OK ✔' ? 'OK' : (order.orderStatus || ''),
       notes: order.notes || '',
       actualDeliveryDate: order.actualDeliveryDate || ''
     });
@@ -469,7 +474,7 @@ export default function App() {
       }
       setIsBatchEditOpen(false);
       setSelectedOrderIds([]);
-      alert(`Successfully updated ${updated} orders! ✨`);
+      alert(`Successfully updated ${updated} orders!`);
     } catch (error) {
       console.error("Error batch updating orders: ", error);
       alert('Failed to batch update orders. Check console for details.');
@@ -741,7 +746,12 @@ export default function App() {
     'Delivered',
     'Undelivered'
   ];
-  const orderStatusOptions = ['-- None --', 'OK ✔', 'Missing', 'Damaged', 'Refunded'];
+  const orderStatusOptions = ['-- None --', 'OK', 'Missing', 'Damaged', 'Refunded'];
+  // Older orders were saved as 'OK ✔'. Both spellings count as OK, and neither shows a glyph: OK gets a check icon.
+  const isOkStatus = (v) => v === 'OK' || v === 'OK ✔';
+  const statusLabel = (v) => (isOkStatus(v)
+    ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Check size={12} strokeWidth={3} /> OK</span>
+    : v);
 
   const totalOrdersCount = batchFilteredOrders.length;
   const deliveredCount = batchFilteredOrders.filter(o => o.shippingStatus === 'Delivered').length;
@@ -791,7 +801,7 @@ export default function App() {
               cursor: currentPage === 1 ? 'not-allowed' : 'pointer'
             }}
           >
-            ◀
+            <ChevronLeft size={15} />
           </button>
 
           {pageNumbers.map(num => (
@@ -813,7 +823,7 @@ export default function App() {
               cursor: currentPage === totalPages ? 'not-allowed' : 'pointer'
             }}
           >
-            ▶
+            <ChevronRight size={15} />
           </button>
         </div>
       </div>
@@ -1002,7 +1012,7 @@ export default function App() {
       }
       const ordered = daysAgo(30);
       return {
-        ...base, date: ordered, shippingStatus: 'Delivered', orderStatus: 'OK ✔', actualDeliveryDate: daysAgo(2),
+        ...base, date: ordered, shippingStatus: 'Delivered', orderStatus: 'OK', actualDeliveryDate: daysAgo(2),
         estDelivery: calculateEstDelivery(ordered), archived: orderKind === 'order-archived'
       };
     });
@@ -1066,7 +1076,7 @@ export default function App() {
   if (authLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#fdfbf7', color: '#7f5539', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
-        🧀 Loading your cozy space... ✨
+        <ShoppingBag size={22} style={{ marginRight: '10px' }} /> Loading your cozy space...
       </div>
     );
   }
@@ -1101,11 +1111,11 @@ export default function App() {
             textAlign: 'center',
             boxSizing: 'border-box'
           }}>
-            <h1 style={{ margin: '0 0 10px 0', color: '#7f5539', fontSize: '24px', fontWeight: '700' }}>
-              🧀 Pinduoduo Tracker
+            <h1 style={{ margin: '0 0 10px 0', color: '#7f5539', fontSize: '24px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+              <ShoppingBag size={26} /> Pinduoduo Tracker
             </h1>
             <p style={{ fontSize: '12px', color: '#8c7a6b', marginBottom: '25px', lineHeight: '1.5' }}>
-              Sign in with your Google account to access your private order tracker and real-time cloud syncing! ✨
+              Sign in with your Google account to access your private order tracker and real-time cloud syncing!
             </p>
             <button
               onClick={handleLogin}
@@ -1117,7 +1127,7 @@ export default function App() {
                 justifyContent: 'center'
               }}
             >
-              Sign in with Google ✨
+              <LogIn size={16} /> Sign in with Google
             </button>
           </div>
         </div>
@@ -1128,7 +1138,7 @@ export default function App() {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#fdfbf7', color: '#7f5539', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
-        🧀 Connecting to Cloud Sync... ✨
+        <ShoppingBag size={22} style={{ marginRight: '10px' }} /> Connecting to Cloud Sync...
       </div>
     );
   }
@@ -1164,7 +1174,7 @@ export default function App() {
               style={{ margin: 0, color: '#7f5539', fontSize: '22px', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '700', cursor: 'pointer' }}
               title="Click to go to Home / General Orders"
             >
-              🧀 Pinduoduo Tracker
+              <ShoppingBag size={22} /> Pinduoduo Tracker
             </h1>
           </div>
           
@@ -1172,7 +1182,7 @@ export default function App() {
             
             <div style={{ position: 'relative' }}>
               <div style={{ display: 'flex', alignItems: 'center', background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '9999px', padding: '6px 14px', width: '250px', boxSizing: 'border-box', boxShadow: '0 2px 0 rgba(199, 175, 150, 0.2)' }}>
-                <span style={{ marginRight: '8px', fontSize: '12px', color: '#7f5539' }}>🔍</span>
+                <Search size={14} color="#7f5539" style={{ marginRight: '8px', flexShrink: 0 }} />
                 <input 
                   type="text" 
                   value={searchQuery}
@@ -1185,7 +1195,7 @@ export default function App() {
                     onClick={() => setSearchQuery('')}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#b0a499', padding: 0 }}
                   >
-                    ✖
+                    <X size={13} />
                   </button>
                 )}
               </div>
@@ -1225,13 +1235,13 @@ export default function App() {
               style={getButtonStyle('light')}
               title="Take the guided tour again"
             >
-              How to Use? ❓
+              <BookOpen size={14} /> How to Use?
             </button>
             <button 
               onClick={() => { setGuideActiveStep(null); setIsGuideOpen(true); }}
               style={getButtonStyle('blue')}
             >
-              Shipping Guide ✨
+              <Truck size={14} /> Shipping Guide
             </button>
             <button 
               data-tour="add-btn"
@@ -1291,7 +1301,7 @@ export default function App() {
                       onClick={() => setIsAccountMenuOpen(false)}
                       style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     >
-                      ✕
+                      <X size={14} style={{ display: 'block', margin: '0 auto' }} />
                     </button>
                   </div>
 
@@ -1348,7 +1358,7 @@ export default function App() {
               onClick={() => setActiveTab('archive')}
               style={getButtonStyle(activeTab === 'archive' ? 'primary' : 'light')}
             >
-              🗄️ Archive ({archivedOrders.length})
+              <Archive size={14} /> Archive ({archivedOrders.length})
             </button>
           </div>
 
@@ -1376,7 +1386,7 @@ export default function App() {
           <div style={{ background: '#fffdfa', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', border: '1px solid #f0e6df', boxSizing: 'border-box', width: '100%' }}>
             <div style={{ background: '#fcf6f0', borderRadius: '12px', padding: '15px', border: '1px solid #e6ccb2', width: '100%', boxSizing: 'border-box' }}>
               <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: '#7f5539', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
-                ✦ Orders At A Glance ({selectedBatch}) ✦
+                <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Orders At A Glance ({selectedBatch})
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '15px', textAlign: 'center' }}>
                 <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
@@ -1426,7 +1436,7 @@ export default function App() {
           <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', marginBottom: '25px', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
-                📦 General Order Tracker — {selectedBatch} {query && `(Filtered by "${searchQuery}")`}
+                <Package size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />General Order Tracker — {selectedBatch} {query && `(Filtered by "${searchQuery}")`}
               </h2>
               
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1436,7 +1446,7 @@ export default function App() {
                     onClick={handleOpenBatchEdit}
                     style={getButtonStyle('pink')}
                   >
-                    ✏️ Batch Edit Selected ({selectedOrderIds.length})
+                    <Pencil size={14} /> Batch Edit Selected ({selectedOrderIds.length})
                   </button>
                 )}
                 {deliveredInView.length > 0 && (
@@ -1446,7 +1456,7 @@ export default function App() {
                     style={getButtonStyle('blue')}
                     title="Move every delivered order shown here into the Archive"
                   >
-                    🗄️ Archive Delivered ({deliveredInView.length})
+                    <Archive size={14} /> Archive Delivered ({deliveredInView.length})
                   </button>
                 )}
                 <span style={{ fontSize: '11px', color: '#8c7a6b', fontWeight: '600' }}>Showing {finalFilteredOrders.length} orders found</span>
@@ -1503,7 +1513,7 @@ export default function App() {
                       }}
                       title="Select all on this page"
                     >
-                      {(currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id))) ? '✔' : ''}
+                      {(currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id))) ? <Check size={12} strokeWidth={3} /> : ''}
                     </div>
                   </th>
                   <th style={{ fontWeight: 'bold' }}>Item Name</th>
@@ -1556,7 +1566,7 @@ export default function App() {
                               boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                             }}
                           >
-                            {isSelected ? '✔' : ''}
+                            {isSelected ? <Check size={12} strokeWidth={3} /> : ''}
                           </div>
                         </td>
                         <td style={{ padding: '12px 8px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{order.name}{order.isTutorialSample && <SampleBadge />}</td>
@@ -1580,8 +1590,8 @@ export default function App() {
                         </td>
                         <td>
                           {order.orderStatus ? (
-                            <span style={{ background: order.orderStatus === 'OK ✔' ? '#d8f3dc' : '#ffccd5', color: order.orderStatus === 'OK ✔' ? '#1b4332' : '#780000', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
-                              {order.orderStatus}
+                            <span style={{ background: isOkStatus(order.orderStatus) ? '#d8f3dc' : '#ffccd5', color: isOkStatus(order.orderStatus) ? '#1b4332' : '#780000', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
+                              {statusLabel(order.orderStatus)}
                             </span>
                           ) : (
                             <span style={{ color: '#b0a499', fontSize: '11px' }}>-</span>
@@ -1613,7 +1623,7 @@ export default function App() {
                                 onClick={() => archiveOrders([order])}
                                 title="Move this delivered order to the Archive"
                               >
-                                🗄️ Archive
+                                <Archive size={13} /> Archive
                               </button>
                             )}
                             <button 
@@ -1621,7 +1631,7 @@ export default function App() {
                               {...ttO(order, 'order-delete')}
                               onClick={() => handleDeleteOrder(order)}
                             >
-                              🗑️
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </td>
@@ -1642,7 +1652,7 @@ export default function App() {
         <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
             <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
-              🗄️ Archived Orders {query && `(Filtered by "${searchQuery}")`}
+              <Archive size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />Archived Orders {query && `(Filtered by "${searchQuery}")`}
             </h2>
             <span style={{ fontSize: '11px', color: '#8c7a6b', fontWeight: '600' }}>
               {finalFilteredArchive.length} archived · not counted in the General Orders dashboard
@@ -1700,8 +1710,8 @@ export default function App() {
                       </td>
                       <td>
                         {order.orderStatus ? (
-                          <span style={{ background: order.orderStatus === 'OK ✔' ? '#d8f3dc' : '#ffccd5', color: order.orderStatus === 'OK ✔' ? '#1b4332' : '#780000', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold' }}>
-                            {order.orderStatus}
+                          <span style={{ background: isOkStatus(order.orderStatus) ? '#d8f3dc' : '#ffccd5', color: isOkStatus(order.orderStatus) ? '#1b4332' : '#780000', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold' }}>
+                            {statusLabel(order.orderStatus)}
                           </span>
                         ) : (
                           <span style={{ color: '#b0a499', fontSize: '11px' }}>-</span>
@@ -1716,10 +1726,10 @@ export default function App() {
                       <td>
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
                           <button {...ttS(order, 'archived-restore')} style={getButtonStyle('light')} onClick={() => restoreOrders([order.id])} title="Put this order back in General Orders exactly where it was">
-                            ↩ Restore
+                            <ArchiveRestore size={13} /> Restore
                           </button>
                           <button style={getButtonStyle('danger')} onClick={() => handleDeleteOrder(order)}>
-                            🗑️
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </td>
@@ -1741,7 +1751,7 @@ export default function App() {
           <div style={{ background: '#fffdfa', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', border: '1px solid #f0e6df', boxSizing: 'border-box', width: '100%' }}>
             <div style={{ background: '#fcf6f0', borderRadius: '12px', padding: '15px', border: '1px solid #e6ccb2', width: '100%', boxSizing: 'border-box' }}>
               <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: '#7f5539', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
-                ✦ Wishlist Dashboard ✦
+                <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Wishlist Dashboard
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '15px', textAlign: 'center' }}>
                 <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
@@ -1767,7 +1777,7 @@ export default function App() {
           <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
-                ✨ Wishlist Tracker & Price Monitor {query && `(Filtered by "${searchQuery}")`}
+                <Heart size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />Wishlist Tracker & Price Monitor {query && `(Filtered by "${searchQuery}")`}
               </h2>
             
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
@@ -1777,7 +1787,7 @@ export default function App() {
                     value={wishlistMoveBatch}
                     onChange={setWishlistMoveBatch}
                     batches={batchInfo}
-                    extras={[{ value: null, label: `✨ Auto (${latestOrderBatch})` }]}
+                    extras={[{ value: null, label: `Auto (${latestOrderBatch})` }]}
                     compact
                   />
                 </div>
@@ -1787,7 +1797,7 @@ export default function App() {
                     onClick={() => handleMoveItemsToTracker(wishlist.filter(w => selectedWishlistIds.includes(w.id)))}
                     style={getButtonStyle('pink')}
                   >
-                    ➡️ Move Selected to Orders ({selectedWishlistIds.length})
+                    <ArrowRight size={14} /> Move Selected to Orders ({selectedWishlistIds.length})
                   </button>
                 )}
               </div>
@@ -1836,7 +1846,7 @@ export default function App() {
                       }}
                       title="Select all on this page"
                     >
-                      {(currentWishlistSlice.length > 0 && currentWishlistSlice.every(w => selectedWishlistIds.includes(w.id))) ? '✔' : ''}
+                      {(currentWishlistSlice.length > 0 && currentWishlistSlice.every(w => selectedWishlistIds.includes(w.id))) ? <Check size={12} strokeWidth={3} /> : ''}
                     </div>
                   </th>
                   <th style={{ fontWeight: 'bold' }}>Item Name</th>
@@ -1878,7 +1888,7 @@ export default function App() {
                             boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                           }}
                         >
-                          {selectedWishlistIds.includes(item.id) ? '✔' : ''}
+                          {selectedWishlistIds.includes(item.id) ? <Check size={12} strokeWidth={3} /> : ''}
                         </div>
                       </td>
                       <td style={{ padding: '12px 10px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{item.name}{item.isTutorialSample && <SampleBadge />}</td>
@@ -1908,7 +1918,7 @@ export default function App() {
                             {...ttW(item, 'wl-delete')}
                             onClick={() => handleDeleteWishlist(item)}
                           >
-                            🗑️
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </td>
@@ -1938,7 +1948,7 @@ export default function App() {
                 onClick={() => setIsGuideOpen(false)} 
                 style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '32px', height: '32px', fontSize: '14px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                ✕
+                <X size={14} style={{ display: 'block', margin: '0 auto' }} />
               </button>
             </div>
 
@@ -1950,7 +1960,7 @@ export default function App() {
               {[
                 { title: 'Ordered', statusKey: 'Ordered', desc: 'Your order is placed and awaiting consolidation at the warehouse.', isStep: true },
                 { title: 'At China Warehouse', statusKey: 'At China Warehouse', desc: 'Package arrived at the China consolidation hub and is getting prepped.', isStep: true },
-                { title: 'Dispatched & China Customs', statusKey: 'Dispatched / China Customs', desc: 'Dispatched from Zhongshan/warehouse. ⚠️ 21–24 business day countdown officially starts here (Weekends excluded).', isStep: true },
+                { title: 'Dispatched & China Customs', statusKey: 'Dispatched / China Customs', desc: 'Dispatched from Zhongshan/warehouse. Important: the 21–24 business day countdown officially starts here (Weekends excluded).', isStep: true },
                 { title: 'In Transit to PH', statusKey: 'In Transit to PH', desc: 'Cruising across international waters or flying over to the Philippines.', isStep: true },
                 { title: 'PH Customs Clearance', statusKey: 'PH Customs Clearance', desc: 'Arrived at the port, clearing customs check, and heading to local sorting.', isStep: true },
                 { title: 'PH Hub / Out for Local Delivery', statusKey: 'PH Hub / Out for Local Delivery', desc: 'Received by J&T or local courier. Almost at your doorstep!', isStep: true },
@@ -2002,7 +2012,7 @@ export default function App() {
                 onClick={() => setIsGuideOpen(false)}
                 style={getButtonStyle('primary')}
               >
-                Got it, let's track! ✨
+                Got it, let's track!
               </button>
             </div>
 
@@ -2023,7 +2033,7 @@ export default function App() {
                 onClick={() => setIsOrderModalOpen(false)} 
                 style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                ✕
+                <X size={14} style={{ display: 'block', margin: '0 auto' }} />
               </button>
             </div>
 
@@ -2069,7 +2079,7 @@ export default function App() {
                     style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                   >
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{orderFormData.shippingStatus || 'Ordered'}</span>
-                    <span style={{ fontSize: '10px', color: '#8c7a6b', marginLeft: '4px' }}>{modalShippingOpen ? '▲' : '▼'}</span>
+                    <span style={{ fontSize: '10px', color: '#8c7a6b', marginLeft: '4px' }}>{modalShippingOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
                   </div>
                   {modalShippingOpen && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '160px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
@@ -2092,8 +2102,8 @@ export default function App() {
                     onClick={() => setModalOrderStatusOpen(!modalOrderStatusOpen)}
                     style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                   >
-                    <span>{orderFormData.orderStatus || '-- Select Status --'}</span>
-                    <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{modalOrderStatusOpen ? '▲' : '▼'}</span>
+                    <span>{orderFormData.orderStatus ? statusLabel(orderFormData.orderStatus) : '-- Select Status --'}</span>
+                    <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{modalOrderStatusOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
                   </div>
                   {modalOrderStatusOpen && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '140px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
@@ -2103,7 +2113,7 @@ export default function App() {
                           onClick={() => { setOrderFormData(prev => ({ ...prev, orderStatus: ost === '-- None --' ? '' : ost })); setModalOrderStatusOpen(false); }}
                           style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: orderFormData.orderStatus === ost ? '#ffd166' : 'transparent', fontWeight: orderFormData.orderStatus === ost ? 'bold' : 'normal', color: '#5c4033' }}
                         >
-                          {ost}
+                          {statusLabel(ost)}
                         </div>
                       ))}
                     </div>
@@ -2140,13 +2150,13 @@ export default function App() {
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
-                ✏️ Batch Edit Selected Orders ({selectedOrderIds.length})
+                <Pencil size={16} style={{ verticalAlign: '-2px', marginRight: '8px' }} />Batch Edit Selected Orders ({selectedOrderIds.length})
               </h2>
               <button 
                 onClick={() => setIsBatchEditOpen(false)} 
                 style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                ✕
+                <X size={14} style={{ display: 'block', margin: '0 auto' }} />
               </button>
             </div>
 
@@ -2175,7 +2185,7 @@ export default function App() {
                   style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
                   <span>{batchEditTargetShipping === KEEP ? '-- Keep current --' : batchEditTargetShipping}</span>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditShippingDropdownOpen ? '▲' : '▼'}</span>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditShippingDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
                 </div>
                 {batchEditShippingDropdownOpen && (
                   <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '160px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
@@ -2199,8 +2209,8 @@ export default function App() {
                   onClick={() => setBatchEditOrderStatusDropdownOpen(!batchEditOrderStatusDropdownOpen)}
                   style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
-                  <span>{batchEditTargetOrderStatus === KEEP ? '-- Keep current --' : (batchEditTargetOrderStatus || '-- None --')}</span>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditOrderStatusDropdownOpen ? '▲' : '▼'}</span>
+                  <span>{batchEditTargetOrderStatus === KEEP ? '-- Keep current --' : (batchEditTargetOrderStatus ? statusLabel(batchEditTargetOrderStatus) : '-- None --')}</span>
+                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditOrderStatusDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
                 </div>
                 {batchEditOrderStatusDropdownOpen && (
                   <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '140px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
@@ -2210,7 +2220,7 @@ export default function App() {
                         onClick={() => { setBatchEditTargetOrderStatus(ost === '-- None --' ? '' : ost); setBatchEditOrderStatusDropdownOpen(false); }}
                         style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetOrderStatus === ost ? '#ffd166' : 'transparent', fontWeight: batchEditTargetOrderStatus === ost ? 'bold' : 'normal', color: '#5c4033' }}
                       >
-                        {ost === KEEP ? '-- Keep current --' : ost}
+                        {ost === KEEP ? '-- Keep current --' : statusLabel(ost)}
                       </div>
                     ))}
                   </div>
@@ -2244,16 +2254,16 @@ export default function App() {
       {/* --- UNDO TOAST (after moving wishlist items to orders) --- */}
       {lastMove && (
         <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 1500, background: '#fffdfa', border: '1px solid #e6ccb2', borderTop: '4px solid #bde0fe', borderRadius: '16px', padding: '12px 16px', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.6)', display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '92vw', boxSizing: 'border-box', fontSize: '12px', color: '#5c4033', flexWrap: 'wrap', justifyContent: 'center' }}>
-          <span>
-            ✨ Moved {lastMove.items.length} {lastMove.items.length === 1 ? 'item' : 'items'} to <strong>{lastMove.batch}</strong> in General Orders.
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <ArrowRight size={14} /> Moved {lastMove.items.length} {lastMove.items.length === 1 ? 'item' : 'items'} to <strong>{lastMove.batch}</strong> in General Orders.
           </span>
-          <button onClick={handleUndoMove} style={getButtonStyle('blue')}>↩ Undo</button>
+          <button onClick={handleUndoMove} style={getButtonStyle('blue')}><Undo2 size={13} /> Undo</button>
           <button
             onClick={() => setLastMove(null)}
             style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '26px', height: '26px', fontSize: '11px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title="Dismiss"
           >
-            ✕
+            <X size={14} style={{ display: 'block', margin: '0 auto' }} />
           </button>
         </div>
       )}
@@ -2261,14 +2271,14 @@ export default function App() {
       {/* --- UNDO TOAST (after archiving delivered orders) --- */}
       {lastArchive && (
         <div style={{ position: 'fixed', bottom: lastMove ? '88px' : '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 1500, background: '#fffdfa', border: '1px solid #e6ccb2', borderTop: '4px solid #bde0fe', borderRadius: '16px', padding: '12px 16px', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.6)', display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '92vw', boxSizing: 'border-box', fontSize: '12px', color: '#5c4033', flexWrap: 'wrap', justifyContent: 'center' }}>
-          <span>🗄️ Archived {lastArchive.ids.length} {lastArchive.ids.length === 1 ? 'order' : 'orders'}.</span>
-          <button onClick={handleUndoArchive} style={getButtonStyle('blue')}>↩ Undo</button>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Archive size={14} /> Archived {lastArchive.ids.length} {lastArchive.ids.length === 1 ? 'order' : 'orders'}.</span>
+          <button onClick={handleUndoArchive} style={getButtonStyle('blue')}><Undo2 size={13} /> Undo</button>
           <button
             onClick={() => setLastArchive(null)}
             style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '26px', height: '26px', fontSize: '11px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title="Dismiss"
           >
-            ✕
+            <X size={14} style={{ display: 'block', margin: '0 auto' }} />
           </button>
         </div>
       )}
@@ -2277,7 +2287,7 @@ export default function App() {
       {confirmDialog && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.4)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000, padding: '15px', boxSizing: 'border-box' }}>
           <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '380px', width: '100%', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.5)', borderTop: '5px solid #ffccd5', boxSizing: 'border-box', border: '1px solid #e6ccb2', textAlign: 'center' }}>
-            <div style={{ fontSize: '28px', marginBottom: '6px' }}>🗑️</div>
+            <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'center', color: '#780000' }}><Trash2 size={30} /></div>
             <h2 style={{ fontSize: '16px', margin: '0 0 8px 0', color: '#7f5539', fontWeight: '700' }}>{confirmDialog.title}</h2>
             <p style={{ fontSize: '12px', color: '#8c7a6b', margin: '0 0 20px 0', lineHeight: '1.5', wordBreak: 'break-word' }}>{confirmDialog.message}</p>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2311,7 +2321,7 @@ export default function App() {
                 onClick={() => setIsWishlistModalOpen(false)} 
                 style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                ✕
+                <X size={14} style={{ display: 'block', margin: '0 auto' }} />
               </button>
             </div>
 
