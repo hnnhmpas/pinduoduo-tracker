@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
+import { getFirestore, collection, onSnapshot, doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import {
+  TourOverlay, TourWelcome, SampleBadge, TOUR_STEPS,
+  TOUR_SAMPLE_ORDER_ID, TOUR_SAMPLE_WISHLIST_ID,
+  FIRST_ORDER_ROW_STEP, FIRST_WISHLIST_ROW_STEP
+} from './Tour.jsx';
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
@@ -162,6 +167,19 @@ export default function App() {
 
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [guideActiveStep, setGuideActiveStep] = useState(null);
+
+  // ONBOARDING TOUR STATE
+  const [tourPhase, setTourPhase] = useState('off'); // 'off' | 'welcome' | 'running'
+  const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [tourLang, setTourLang] = useState('en');
+  const [tourSampleOrder, setTourSampleOrder] = useState(null);       // local state only - never written to Firebase
+  const [tourSampleWishlist, setTourSampleWishlist] = useState(null); // local state only - never written to Firebase
+  const [tourRealOrderId, setTourRealOrderId] = useState(null);       // a real order the user saved during the tour
+  const [tourRealWishlistId, setTourRealWishlistId] = useState(null); // a real wishlist item saved during the tour
+  const [tutorialStatusLoaded, setTutorialStatusLoaded] = useState(false);
+  const [hasCompletedTutorial, setHasCompletedTutorial] = useState(true);
+  const prevTourModalRef = useRef(null);
+  const tourViewSnapshotRef = useRef(null);
 
   // FORM STATES
   const [orderFormData, setOrderFormData] = useState({
@@ -390,6 +408,7 @@ export default function App() {
 
     try {
       await setDoc(doc(db, "users", user.uid, "pdd_orders", orderId), orderPayload);
+      if (!editingOrder) onTourRealSave('order', orderId);
     } catch (error) {
       console.error("Error saving order: ", error);
     }
@@ -519,6 +538,7 @@ export default function App() {
 
     try {
       await setDoc(doc(db, "users", user.uid, "pdd_wishlist", itemId), wishlistPayload);
+      if (!editingWishlistItem) onTourRealSave('wishlist', itemId);
     } catch (error) {
       console.error("Error saving wishlist item: ", error);
     }
@@ -608,11 +628,15 @@ export default function App() {
     );
   };
 
+  // Tour sample rows are merged in for DISPLAY ONLY - they never enter `orders` / `wishlist` or Firebase.
+  const ordersForView = tourSampleOrder ? [tourSampleOrder, ...orders] : orders;
+  const wishlistForView = tourSampleWishlist ? [tourSampleWishlist, ...wishlist] : wishlist;
+
   const query = searchQuery.trim().toLowerCase();
 
   const batchFilteredOrders = selectedBatch === 'All Batches' 
-    ? orders 
-    : orders.filter(o => o.batch === selectedBatch);
+    ? ordersForView 
+    : ordersForView.filter(o => o.batch === selectedBatch);
 
   const finalFilteredOrders = query 
     ? batchFilteredOrders.filter(o => o.name.toLowerCase().includes(query))
@@ -621,8 +645,8 @@ export default function App() {
   const displayTotalCost = finalFilteredOrders.reduce((acc, item) => acc + (item.qty * item.cost), 0);
 
   const finalFilteredWishlist = query
-    ? wishlist.filter(item => item.name.toLowerCase().includes(query))
-    : wishlist;
+    ? wishlistForView.filter(item => item.name.toLowerCase().includes(query))
+    : wishlistForView;
 
   const allEntries = [
     ...orders.map(o => ({ name: o.name, type: 'Order', tab: 'orders' })),
@@ -645,8 +669,8 @@ export default function App() {
     wishlistPage * wishlistPerPage
   );
 
-  const wishlistInitialTotal = wishlist.reduce((acc, item) => acc + (item.qty * item.initialCost), 0);
-  const wishlistLatestTotal = wishlist.reduce((acc, item) => acc + (item.qty * item.latestCost), 0);
+  const wishlistInitialTotal = wishlistForView.reduce((acc, item) => acc + (item.qty * item.initialCost), 0);
+  const wishlistLatestTotal = wishlistForView.reduce((acc, item) => acc + (item.qty * item.latestCost), 0);
 
   const batchOptions = ['All Batches', ...Array.from({ length: 25 }, (_, i) => `Batch ${i + 1}`)];
   const shippingStatusOptions = [
@@ -736,6 +760,227 @@ export default function App() {
       </div>
     );
   };
+
+
+  // =====================================================================
+  // ONBOARDING TOUR LOGIC
+  // =====================================================================
+  const resetTourDropdowns = () => {
+    setModalBatchOpen(false);
+    setModalShippingOpen(false);
+    setModalOrderStatusOpen(false);
+    setBatchEditBatchDropdownOpen(false);
+    setBatchEditShippingDropdownOpen(false);
+    setBatchEditOrderStatusDropdownOpen(false);
+    setIsBatchDropdownOpen(false);
+    setWishlistMoveBatchOpen(false);
+    setIsAccountMenuOpen(false);
+  };
+
+  const closeTourModals = () => {
+    setIsOrderModalOpen(false);
+    setEditingOrder(null);
+    setIsWishlistModalOpen(false);
+    setEditingWishlistItem(null);
+    setIsBatchEditOpen(false);
+    resetTourDropdowns();
+  };
+
+  // 1) Read the "has seen the tutorial" flag from Firestore when the user signs in
+  useEffect(() => {
+    if (!user) {
+      setTutorialStatusLoaded(false);
+      setHasCompletedTutorial(true);
+      setTourPhase('off');
+      return;
+    }
+    let cancelled = false;
+    setTutorialStatusLoaded(false);
+    (async () => {
+      let completed = true; // if the read fails, don't nag the user with the tour on every login
+      try {
+        const snap = await getDoc(doc(db, "users", user.uid, "pdd_settings", "profile"));
+        completed = snap.exists() && snap.data().hasCompletedTutorial === true;
+      } catch (error) {
+        console.error("Error loading tutorial status: ", error);
+      }
+      if (!cancelled) {
+        setHasCompletedTutorial(completed);
+        setTutorialStatusLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // 2) Auto-start once for anyone who hasn't completed or skipped it (new and existing users)
+  useEffect(() => {
+    if (user && !loading && tutorialStatusLoaded && !hasCompletedTutorial && tourPhase === 'off') {
+      setTourPhase('welcome');
+    }
+  }, [user, loading, tutorialStatusLoaded, hasCompletedTutorial, tourPhase]);
+
+  const markTutorialComplete = async () => {
+    setHasCompletedTutorial(true);
+    if (!user) return;
+    try {
+      await setDoc(doc(db, "users", user.uid, "pdd_settings", "profile"), { hasCompletedTutorial: true }, { merge: true });
+    } catch (error) {
+      console.error("Error saving tutorial status: ", error);
+    }
+  };
+
+  // "How to Use?" button
+  const openTour = () => {
+    setIsAccountMenuOpen(false);
+    setIsGuideOpen(false);
+    setConfirmDialog(null);
+    setIsBatchDropdownOpen(false);
+    setTourPhase('welcome');
+  };
+
+  // Language picked in the welcome prompt -> remember the user's current view, then start the spotlight steps
+  const startTourSteps = (lang) => {
+    tourViewSnapshotRef.current = { activeTab, selectedBatch, searchQuery, ordersPage, wishlistPage, selectedOrderIds, selectedWishlistIds };
+    prevTourModalRef.current = null;
+    setTourLang(lang);
+    setSearchQuery('');
+    setSelectedBatch('All Batches');
+    setOrdersPage(1);
+    setWishlistPage(1);
+    setSelectedOrderIds([]);
+    setSelectedWishlistIds([]);
+    setTourRealOrderId(null);
+    setTourRealWishlistId(null);
+    setTourStepIndex(0);
+    setTourPhase('running');
+  };
+
+  // Finish AND Skip both land here: remove samples, restore the user's view, save the flag
+  const finishTour = () => {
+    setTourPhase('off');
+    setTourSampleOrder(null);
+    setTourSampleWishlist(null);
+    setTourRealOrderId(null);
+    setTourRealWishlistId(null);
+    closeTourModals();
+    prevTourModalRef.current = null;
+    const snap = tourViewSnapshotRef.current;
+    if (snap) {
+      setActiveTab(snap.activeTab);
+      setSelectedBatch(snap.selectedBatch);
+      setSearchQuery(snap.searchQuery);
+      setOrdersPage(snap.ordersPage);
+      setWishlistPage(snap.wishlistPage);
+      setSelectedOrderIds(snap.selectedOrderIds);
+      setSelectedWishlistIds(snap.selectedWishlistIds);
+      tourViewSnapshotRef.current = null;
+    }
+    markTutorialComplete();
+  };
+
+  const tourNext = () => {
+    if (tourStepIndex >= TOUR_STEPS.length - 1) finishTour();
+    else setTourStepIndex(i => i + 1);
+  };
+  const tourBack = () => setTourStepIndex(i => Math.max(0, i - 1));
+
+  // If the user really saves an entry while a tour form is open, keep that entry and jump to its row steps
+  const onTourRealSave = (kind, id) => {
+    if (tourPhase !== 'running') return;
+    const step = TOUR_STEPS[tourStepIndex];
+    if (kind === 'order' && step.modal === 'order') {
+      setTourRealOrderId(id);
+      setTourStepIndex(FIRST_ORDER_ROW_STEP);
+    }
+    if (kind === 'wishlist' && step.modal === 'wishlist') {
+      setTourRealWishlistId(id);
+      setTourStepIndex(FIRST_WISHLIST_ROW_STEP);
+    }
+  };
+
+  // Which row do the row-level steps point at? A real entry made during the tour, else the sample.
+  const realTourOrderExists = !!tourRealOrderId && orders.some(o => o.id === tourRealOrderId);
+  const realTourWishlistExists = !!tourRealWishlistId && wishlist.some(w => w.id === tourRealWishlistId);
+  const tourOrderTargetId = tourPhase === 'running'
+    ? (realTourOrderExists ? tourRealOrderId : (tourSampleOrder ? tourSampleOrder.id : null))
+    : null;
+  const tourWishlistTargetId = tourPhase === 'running'
+    ? (realTourWishlistExists ? tourRealWishlistId : (tourSampleWishlist ? tourSampleWishlist.id : null))
+    : null;
+  const ttO = (order, name) => (tourOrderTargetId && order.id === tourOrderTargetId ? { 'data-tour': name } : {});
+  const ttW = (item, name) => (tourWishlistTargetId && item.id === tourWishlistTargetId ? { 'data-tour': name } : {});
+
+  // 3) Inject / remove the temporary sample rows (local state only)
+  useEffect(() => {
+    if (tourPhase !== 'running') {
+      setTourSampleOrder(null);
+      setTourSampleWishlist(null);
+      return;
+    }
+    const step = TOUR_STEPS[tourStepIndex];
+    const today = new Date().toISOString().split('T')[0];
+
+    setTourSampleOrder(prev => (step.sample === 'order' && !realTourOrderExists)
+      ? (prev || {
+          id: TOUR_SAMPLE_ORDER_ID, name: 'Sample: Minimalist Rug', qty: 2, cost: 150, date: today,
+          batch: 'Batch 1', shippingStatus: 'Ordered', orderStatus: '', notes: 'Tutorial sample',
+          actualDeliveryDate: '', estDelivery: calculateEstDelivery(today), isTutorialSample: true
+        })
+      : null);
+
+    setTourSampleWishlist(prev => (step.sample === 'wishlist' && !realTourWishlistExists)
+      ? (prev || {
+          id: TOUR_SAMPLE_WISHLIST_ID, name: 'Sample: Cute Makeup Organizer', qty: 1,
+          initialCost: 45, latestCost: 38, isTutorialSample: true
+        })
+      : null);
+  }, [tourPhase, tourStepIndex, realTourOrderExists, realTourWishlistExists]);
+
+  // 4) Put the UI into the state the current step asks for (tab, modals, ticked row, visible page)
+  useEffect(() => {
+    if (tourPhase !== 'running') return;
+    const step = TOUR_STEPS[tourStepIndex];
+
+    setActiveTab(step.tab);
+    resetTourDropdowns();
+
+    // Open a modal fresh only when we arrive at it, so typing survives moving between its steps
+    const prevModal = prevTourModalRef.current;
+    if (step.modal === 'order') { if (prevModal !== 'order') handleOpenAddOrder(); }
+    else setIsOrderModalOpen(false);
+
+    if (step.modal === 'wishlist') { if (prevModal !== 'wishlist') handleOpenAddWishlist(); }
+    else setIsWishlistModalOpen(false);
+
+    if (step.modal === 'batch') {
+      if (prevModal !== 'batch') {
+        setBatchEditTargetBatch(KEEP);
+        setBatchEditTargetShipping(KEEP);
+        setBatchEditTargetOrderStatus(KEEP);
+        setBatchEditTargetActualDelivery('');
+      }
+      setIsBatchEditOpen(true);
+    } else {
+      setIsBatchEditOpen(false);
+    }
+    prevTourModalRef.current = step.modal;
+
+    // Tick the target row's checkbox so the Batch Edit button appears (and untick it afterwards)
+    const orderTargetId = realTourOrderExists ? tourRealOrderId : TOUR_SAMPLE_ORDER_ID;
+    setSelectedOrderIds(step.checkRow ? [orderTargetId] : []);
+    setSelectedWishlistIds([]);
+
+    // Make sure the target row is on the page being shown (sample rows are always first)
+    if (step.sample === 'order') {
+      const idx = realTourOrderExists ? finalFilteredOrders.findIndex(o => o.id === tourRealOrderId) : 0;
+      setOrdersPage(idx >= 0 ? Math.floor(idx / ordersPerPage) + 1 : 1);
+    }
+    if (step.sample === 'wishlist') {
+      const idx = realTourWishlistExists ? finalFilteredWishlist.findIndex(w => w.id === tourRealWishlistId) : 0;
+      setWishlistPage(idx >= 0 ? Math.floor(idx / wishlistPerPage) + 1 : 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tourPhase, tourStepIndex, realTourOrderExists, realTourWishlistExists]);
 
   if (authLoading) {
     return (
@@ -892,6 +1137,14 @@ export default function App() {
               )}
             </div>
 
+            <button
+              data-tour="help-btn"
+              onClick={openTour}
+              style={getButtonStyle('light')}
+              title="Take the guided tour again"
+            >
+              How to Use? ❓
+            </button>
             <button 
               onClick={() => { setGuideActiveStep(null); setIsGuideOpen(true); }}
               style={getButtonStyle('blue')}
@@ -899,6 +1152,7 @@ export default function App() {
               Shipping Guide ✨
             </button>
             <button 
+              data-tour="add-btn"
               onClick={activeTab === 'wishlist' ? handleOpenAddWishlist : handleOpenAddOrder}
               style={getButtonStyle('pink')}
             >
@@ -1001,6 +1255,7 @@ export default function App() {
               General Orders ({orders.length})
             </button>
             <button
+              data-tour="tab-wishlist"
               onClick={() => setActiveTab('wishlist')}
               style={getButtonStyle(activeTab === 'wishlist' ? 'primary' : 'light')}
             >
@@ -1139,6 +1394,7 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 {selectedOrderIds.length > 0 && (
                   <button
+                    data-tour="batch-btn"
                     onClick={handleOpenBatchEdit}
                     style={getButtonStyle('pink')}
                   >
@@ -1229,10 +1485,11 @@ export default function App() {
                     const actualDays = calculateActualShippingDays(order.date, order.actualDeliveryDate);
                     const isSelected = selectedOrderIds.includes(order.id);
                     return (
-                      <tr key={order.id} style={{ borderBottom: '1px solid #fcf6f0', background: isSelected ? '#fff5f7' : 'transparent' }}>
+                      <tr key={order.id} {...ttO(order, 'order-row')} style={{ borderBottom: '1px solid #fcf6f0', background: isSelected ? '#fff5f7' : 'transparent' }}>
                         <td style={{ padding: '12px 6px' }}>
                           {/* CUSTOM COZY CHECKBOX FOR ROW */}
                           <div 
+                            {...ttO(order, 'order-check')}
                             onClick={() => handleToggleSelectOrder(order.id)}
                             style={{
                               width: '16px',
@@ -1254,10 +1511,10 @@ export default function App() {
                             {isSelected ? '✔' : ''}
                           </div>
                         </td>
-                        <td style={{ padding: '12px 8px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{order.name}</td>
+                        <td style={{ padding: '12px 8px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{order.name}{order.isTutorialSample && <SampleBadge />}</td>
                         <td>{order.qty}</td>
                         <td>₱{Number(order.cost).toFixed(2)}</td>
-                        <td style={{ color: '#bc6c25', fontWeight: 'bold' }}>₱{(order.qty * order.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td {...ttO(order, 'order-total')} style={{ color: '#bc6c25', fontWeight: 'bold' }}>₱{(order.qty * order.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         <td>{order.date}</td>
                         <td>
                           <span style={{ background: '#ffd166', color: '#5c4033', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
@@ -1283,7 +1540,7 @@ export default function App() {
                           )}
                         </td>
                         <td style={{ color: '#8c7a6b', wordBreak: 'break-word' }}>{order.notes || '-'}</td>
-                        <td style={{ color: '#8c7a6b' }}>{order.estDelivery}</td>
+                        <td {...ttO(order, 'order-est')} style={{ color: '#8c7a6b' }}>{order.estDelivery}</td>
                         <td style={{ color: order.actualDeliveryDate ? '#5c4033' : '#b0a499' }}>
                           {order.actualDeliveryDate || '-'}
                         </td>
@@ -1296,12 +1553,14 @@ export default function App() {
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
                             <button 
                               style={getButtonStyle('pink')}
+                              {...ttO(order, 'order-edit')}
                               onClick={() => handleOpenEditOrder(order)}
                             >
                               Edit
                             </button>
                             <button 
                               style={getButtonStyle('danger')}
+                              {...ttO(order, 'order-delete')}
                               onClick={() => handleDeleteOrder(order)}
                             >
                               🗑️
@@ -1464,7 +1723,7 @@ export default function App() {
                   </tr>
                 ) : (
                   currentWishlistSlice.map((item) => (
-                    <tr key={item.id} style={{ borderBottom: '1px solid #fcf6f0', background: selectedWishlistIds.includes(item.id) ? '#fff5f7' : 'transparent' }}>
+                    <tr key={item.id} {...ttW(item, 'wl-row')} style={{ borderBottom: '1px solid #fcf6f0', background: selectedWishlistIds.includes(item.id) ? '#fff5f7' : 'transparent' }}>
                       <td style={{ padding: '12px 6px' }}>
                         <div
                           onClick={() => handleToggleSelectWishlist(item.id)}
@@ -1488,28 +1747,31 @@ export default function App() {
                           {selectedWishlistIds.includes(item.id) ? '✔' : ''}
                         </div>
                       </td>
-                      <td style={{ padding: '12px 10px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{item.name}</td>
+                      <td style={{ padding: '12px 10px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{item.name}{item.isTutorialSample && <SampleBadge />}</td>
                       <td>{item.qty}</td>
                       <td>₱{Number(item.initialCost).toFixed(2)}</td>
                       <td style={{ color: '#5c4033', fontWeight: '500' }}>₱{(item.qty * item.initialCost).toFixed(2)}</td>
                       <td style={{ color: '#bc6c25', fontWeight: 'bold' }}>₱{Number(item.latestCost).toFixed(2)}</td>
-                      <td>{renderPriceFlag(item.qty, item.initialCost, item.latestCost)}</td>
+                      <td {...ttW(item, 'wl-flag')}>{renderPriceFlag(item.qty, item.initialCost, item.latestCost)}</td>
                       <td>
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
                           <button 
                             style={getButtonStyle('pink')}
+                            {...ttW(item, 'wl-edit')}
                             onClick={() => handleOpenEditWishlist(item)}
                           >
                             Edit
                           </button>
                           <button 
                             style={getButtonStyle('primary')}
+                            {...ttW(item, 'wl-move')}
                             onClick={() => handleMoveItemsToTracker([item])}
                           >
                             Move
                           </button>
                           <button 
                             style={getButtonStyle('danger')}
+                            {...ttW(item, 'wl-delete')}
                             onClick={() => handleDeleteWishlist(item)}
                           >
                             🗑️
@@ -1632,29 +1894,29 @@ export default function App() {
             </div>
 
             <form onSubmit={handleSaveOrder} style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
-              <div>
+              <div data-tour="order-name">
                 <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Item Name*</label>
                 <input type="text" name="name" value={orderFormData.name} onChange={handleOrderInputChange} placeholder="e.g. Minimalist Rug" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} required />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
+                <div data-tour="order-qty">
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Quantity</label>
                   <input type="number" name="qty" min="1" value={orderFormData.qty} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
                 </div>
-                <div>
+                <div data-tour="order-cost">
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Cost (Unit) (₱)*</label>
                   <input type="number" name="cost" value={orderFormData.cost} onChange={handleOrderInputChange} placeholder="250" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} required />
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
+                <div data-tour="order-date">
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Date Ordered</label>
                   <input type="date" name="date" value={orderFormData.date} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
                 </div>
 
-                <div style={{ position: 'relative' }}>
+                <div data-tour="order-batch" style={{ position: 'relative' }}>
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Batch</label>
                   <div 
                     onClick={() => setModalBatchOpen(!modalBatchOpen)}
@@ -1680,7 +1942,7 @@ export default function App() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div style={{ position: 'relative' }}>
+                <div data-tour="order-shipping" style={{ position: 'relative' }}>
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Shipping Status</label>
                   <div 
                     onClick={() => setModalShippingOpen(!modalShippingOpen)}
@@ -1704,7 +1966,7 @@ export default function App() {
                   )}
                 </div>
 
-                <div style={{ position: 'relative' }}>
+                <div data-tour="order-status" style={{ position: 'relative' }}>
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Order Status</label>
                   <div 
                     onClick={() => setModalOrderStatusOpen(!modalOrderStatusOpen)}
@@ -1730,11 +1992,11 @@ export default function App() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
+                <div data-tour="order-actual">
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Actual Delivery Date</label>
                   <input type="date" name="actualDeliveryDate" value={orderFormData.actualDeliveryDate} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
                 </div>
-                <div>
+                <div data-tour="order-notes">
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Notes/Comments</label>
                   <input type="text" name="notes" value={orderFormData.notes} onChange={handleOrderInputChange} placeholder="Optional notes..." style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
                 </div>
@@ -1742,7 +2004,7 @@ export default function App() {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsOrderModalOpen(false)} style={getButtonStyle('light')}>Cancel</button>
-                <button type="submit" style={getButtonStyle('primary')}>
+                <button data-tour="order-save" type="submit" style={getButtonStyle('primary')}>
                   {editingOrder ? 'Update Order' : 'Save Order'}
                 </button>
               </div>
@@ -1754,7 +2016,7 @@ export default function App() {
       {/* --- BATCH EDIT MODAL FOR SELECTED ORDERS --- */}
       {isBatchEditOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '460px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
+          <div data-tour="batch-modal" style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '460px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px' }}>
               <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
@@ -1932,22 +2194,22 @@ export default function App() {
             </div>
 
             <form onSubmit={handleSaveWishlist} style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
-              <div>
+              <div data-tour="wl-name">
                 <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Item Name*</label>
                 <input type="text" name="name" value={wishlistFormData.name} onChange={handleWishlistInputChange} placeholder="e.g. Cute Makeup Organizer" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} required />
               </div>
 
-              <div>
+              <div data-tour="wl-qty">
                 <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Quantity</label>
                 <input type="number" name="qty" min="1" value={wishlistFormData.qty} onChange={handleWishlistInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
+                <div data-tour="wl-initial">
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Initial Cost (Unit ₱)*</label>
                   <input type="number" step="0.01" name="initialCost" value={wishlistFormData.initialCost} onChange={handleWishlistInputChange} placeholder="45.00" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} required />
                 </div>
-                <div>
+                <div data-tour="wl-latest">
                   <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Latest Cost (Unit ₱)</label>
                   <input type="number" step="0.01" name="latestCost" value={wishlistFormData.latestCost} onChange={handleWishlistInputChange} placeholder="Leave empty if same" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
                 </div>
@@ -1971,13 +2233,28 @@ export default function App() {
               {/* Cancel left, Action right */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsWishlistModalOpen(false)} style={getButtonStyle('light')}>Cancel</button>
-                <button type="submit" style={getButtonStyle('primary')}>
+                <button data-tour="wl-add" type="submit" style={getButtonStyle('primary')}>
                   {editingWishlistItem ? 'Update Item' : 'Add Item'}
                 </button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {/* --- ONBOARDING TOUR --- */}
+      {tourPhase === 'welcome' && (
+        <TourWelcome onPick={startTourSteps} onSkip={finishTour} />
+      )}
+      {tourPhase === 'running' && (
+        <TourOverlay
+          stepIndex={tourStepIndex}
+          lang={tourLang}
+          onLang={setTourLang}
+          onNext={tourNext}
+          onBack={tourBack}
+          onSkip={finishTour}
+        />
       )}
 
     </div>
