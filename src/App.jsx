@@ -8,10 +8,11 @@ import {
   FIRST_ORDER_ROW_STEP, FIRST_WISHLIST_ROW_STEP
 } from './Tour.jsx';
 import { BatchPicker, buildBatchInfo } from './BatchPicker.jsx';
+import { PhotoReviewModal } from './PhotoReview.jsx';
 import {
   ShoppingBag, LogIn, Search, X, BookOpen, Truck, Archive, ArchiveRestore, Undo2,
   LayoutDashboard, Package, Heart, Pencil, Trash2, Check, ArrowDown, ArrowUp, ArrowRight,
-  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Moon, Sun, Plus
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Moon, Sun, Plus, Camera
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -264,6 +265,9 @@ export default function App() {
   const [isWishlistModalOpen, setIsWishlistModalOpen] = useState(false);
   const [editingWishlistItem, setEditingWishlistItem] = useState(null);
 
+  // Photo review generator (client-side only; nothing is saved to Firebase)
+  const [photoReviewOrder, setPhotoReviewOrder] = useState(null);
+
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [guideActiveStep, setGuideActiveStep] = useState(null);
 
@@ -364,6 +368,19 @@ export default function App() {
       boxSizing: 'border-box'
     };
   };
+
+  // Shown on any order marked Delivered, in General Orders or the Archive
+  const photoReviewButton = (order) => (order.shippingStatus === 'Delivered' ? (
+    <button
+      type="button"
+      onClick={() => setPhotoReviewOrder(order)}
+      style={{ ...getButtonStyle('primary'), padding: '8px 10px' }}
+      title="Generate Photo Review"
+      aria-label="Generate Photo Review"
+    >
+      <Camera size={14} />
+    </button>
+  ) : null);
 
   const getShippingBadgeStyle = (status) => {
     let bg = 'var(--c-ffffff)';
@@ -1809,6 +1826,7 @@ export default function App() {
                                 <Archive size={13} /> Archive
                               </button>
                             )}
+                            {photoReviewButton(order)}
                             <button 
                               style={getButtonStyle('danger')}
                               {...ttO(order, 'order-delete')}
@@ -1928,6 +1946,7 @@ export default function App() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                          {photoReviewButton(order)}
                           <button {...ttS(order, 'archived-restore')} style={getButtonStyle('light')} onClick={() => restoreOrders([order.id])} title="Put this order back in General Orders exactly where it was">
                             <ArchiveRestore size={13} /> Restore
                           </button>
@@ -2509,6 +2528,10 @@ export default function App() {
       )}
 
       {/* --- ADD / EDIT WISHLIST MODAL --- */}
+      {photoReviewOrder && (
+        <PhotoReviewModal order={photoReviewOrder} onClose={() => setPhotoReviewOrder(null)} />
+      )}
+
       {isWishlistModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
           <div style={{ background: 'var(--c-fffdfa)', borderRadius: '16px', padding: '25px', maxWidth: '440px', width: '100%', boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.4)', borderTop: '5px solid var(--c-ffafcc)', boxSizing: 'border-box', border: '1px solid var(--c-e6ccb2)' }}>
