@@ -39,6 +39,15 @@
   --shadow-rgb: 230, 204, 178;
   --shadow-btn-rgb: 199, 175, 150;
   color-scheme: light;
+
+  /* Dashboard box tints: soft pastels, light enough that the text stays easy to read */
+  --tint-butter: #fff6dc;  --tint-butter-border: #f3e0a6;
+  --tint-peach:  #ffeee0;  --tint-peach-border:  #f6d5b8;
+  --tint-rose:   #ffecf1;  --tint-rose-border:   #f7cdd9;
+  --tint-sky:    #eaf4fe;  --tint-sky-border:    #c9e0f5;
+  --tint-lilac:  #f3ecfb;  --tint-lilac-border:  #dccbef;
+  --tint-mint:   #eaf7ec;  --tint-mint-border:   #c6e5cb;
+  --tint-sand:   #fbf1e6;  --tint-sand-border:   #ead6bf;
 }
 
 /* Dark mode: same warm palette (cream -> deep cocoa, pastel accents -> deepened pink / gold / blue) */
@@ -83,6 +92,15 @@
   --shadow-rgb: 0, 0, 0;
   --shadow-btn-rgb: 0, 0, 0;
   color-scheme: dark;
+
+  /* Dashboard box tints, dark mode: muted, low-saturation cocoa-tinted so they never glare */
+  --tint-butter: #332b1a;  --tint-butter-border: #54451f;
+  --tint-peach:  #342720;  --tint-peach-border:  #55402f;
+  --tint-rose:   #35232a;  --tint-rose-border:   #573543;
+  --tint-sky:    #212c37;  --tint-sky-border:    #36485b;
+  --tint-lilac:  #2c2536;  --tint-lilac-border:   #483b5a;
+  --tint-mint:   #22302a;  --tint-mint-border:   #38503f;
+  --tint-sand:   #2d2620;  --tint-sand-border:   #4a3c30;
 }
 
 input, select, textarea { color: var(--c-5c4033); }

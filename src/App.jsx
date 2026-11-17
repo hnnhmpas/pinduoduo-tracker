@@ -11,7 +11,7 @@ import { BatchPicker, buildBatchInfo } from './BatchPicker.jsx';
 import {
   ShoppingBag, LogIn, Search, X, BookOpen, Truck, Archive, ArchiveRestore, Undo2,
   LayoutDashboard, Package, Heart, Pencil, Trash2, Check, ArrowDown, ArrowUp, ArrowRight,
-  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Moon, Sun
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Moon, Sun, Plus
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -855,7 +855,8 @@ export default function App() {
     : v);
 
   const totalOrdersCount = batchFilteredOrders.length;
-  const deliveredCount = batchFilteredOrders.filter(o => o.shippingStatus === 'Delivered').length;
+  // Delivered is STANDALONE like the average: every delivered order counts (archived too) and the batch filter is ignored.
+  const deliveredCount = [...ordersForView, ...archivedForView].filter(o => o.shippingStatus === 'Delivered').length;
   const totalQuantity = batchFilteredOrders.reduce((acc, o) => acc + (Number(o.qty) || 0), 0);
   const statusStats = (status) => {
     const list = batchFilteredOrders.filter(o => o.shippingStatus === status);
@@ -881,8 +882,10 @@ export default function App() {
   const archiveTotalSpent = archiveBatchView.reduce((acc, o) => acc + (Number(o.qty) || 0) * (Number(o.cost) || 0), 0);
   const archiveAvgDays = averageDays(archivedForView);
   const money = (n) => `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const statCard = (label, value, color, sub, title) => (
-    <div key={label} title={title} style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+  // Soft pastel tints (theme-aware, defined in index.css) so the dashboard boxes stay light and easy to read
+  const tintBox = (tint = 'sand') => ({ background: `var(--tint-${tint})`, padding: '10px', borderRadius: '10px', border: `1px solid var(--tint-${tint}-border)` });
+  const statCard = (label, value, color, sub, title, tint) => (
+    <div key={label} title={title} style={tintBox(tint)}>
       <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700' }}>{label}</span>
       <strong style={{ fontSize: '16px', color }}>{value}</strong>
       {sub != null && <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', marginTop: '2px' }}>{sub}</span>}
@@ -1402,13 +1405,6 @@ export default function App() {
             >
               <Truck size={14} /> Shipping Guide
             </button>
-            <button 
-              data-tour="add-btn"
-              onClick={activeTab === 'wishlist' ? handleOpenAddWishlist : handleOpenAddOrder}
-              style={activeTab === 'archive' ? { display: 'none' } : getButtonStyle('pink')}
-            >
-              {activeTab === 'wishlist' ? 'Add Wishlist Item' : 'Add Order'}
-            </button>
 
             {/* STRAWBERRY CAT ACCOUNT / SIGNOUT POPUP BUTTON */}
             <div style={{ position: 'relative' }} ref={accountMenuRef}>
@@ -1543,10 +1539,20 @@ export default function App() {
             </button>
           </div>
 
-          {(activeTab === 'orders' || activeTab === 'archive') && (
-            <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '18px', alignItems: 'flex-end', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {activeTab !== 'archive' && (
+              <button
+                data-tour="add-btn"
+                onClick={activeTab === 'wishlist' ? handleOpenAddWishlist : handleOpenAddOrder}
+                style={getButtonStyle('pink')}
+              >
+                <Plus size={14} strokeWidth={3} /> {activeTab === 'wishlist' ? 'Add Wishlist Item' : 'Add Order'}
+              </button>
+            )}
+
+            {(activeTab === 'orders' || activeTab === 'archive') && (
               <div data-tour="batch-filter">
-                <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px' }}>BATCH FILTER</span>
+                <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px', textAlign: 'left' }}>BATCH FILTER</span>
                 {activeTab === 'archive' ? (
                   <BatchPicker
                     value={archiveBatch}
@@ -1566,8 +1572,21 @@ export default function App() {
                   />
                 )}
               </div>
-            </div>
-          )}
+            )}
+
+            {activeTab === 'wishlist' && (
+              <div>
+                <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px', textAlign: 'left' }}>MOVE TO BATCH</span>
+                <BatchPicker
+                  value={wishlistMoveBatch}
+                  onChange={setWishlistMoveBatch}
+                  batches={batchInfo}
+                  extras={[{ value: null, label: `Auto (${latestOrderBatch})` }]}
+                  compact
+                />
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -1578,27 +1597,32 @@ export default function App() {
           <div style={{ background: 'var(--c-fffdfa)', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', border: '1px solid var(--c-f0e6df)', boxSizing: 'border-box', width: '100%' }}>
             <div style={{ background: 'var(--c-fcf6f0)', borderRadius: '12px', padding: '15px', border: '1px solid var(--c-e6ccb2)', width: '100%', boxSizing: 'border-box' }}>
               <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: 'var(--c-7f5539)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
-                <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Orders At A Glance ({selectedBatch})
+                <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />General Order Dashboard ({selectedBatch})
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '15px', textAlign: 'center' }}>
-                {statCard('TOTAL ORDERS', totalOrdersCount, 'var(--c-5c4033)')}
-                {statCard('TOTAL QUANTITY (PCS)', totalQuantity, 'var(--c-5c4033)')}
-                {statCard('TOTAL SPENT', money(displayTotalCost), 'var(--c-bc6c25)')}
-                {statCard('IN CHINA CUSTOMS', chinaCustomsStats.entries, 'var(--c-3a6ea5)', `${chinaCustomsStats.pcs} pcs`)}
-                {statCard('IN TRANSIT TO PH', inTransitStats.entries, 'var(--c-bc6c25)', `${inTransitStats.pcs} pcs`)}
-                {statCard('IN PH CUSTOMS', phCustomsStats.entries, 'var(--c-6a4c93)', `${phCustomsStats.pcs} pcs`)}
-                {statCard('PH HUB / OUT FOR DELIVERY', phHubStats.entries, 'var(--c-2d6a4f)', `${phHubStats.pcs} pcs`)}
-                {statCard('DELIVERED', deliveredCount, 'var(--c-2d6a4f)')}
-                {statCard('AVG SHIPPING DAYS', avgShippingDays !== '-' ? `${avgShippingDays} days` : '-', 'var(--c-7f5539)', 'all orders, incl. archived', 'Standalone: counts every order (archived too) and ignores the batch filter. Only permanently deleting an order removes it from this average.')}
+                {statCard('TOTAL ORDERS', totalOrdersCount, 'var(--c-5c4033)', undefined, undefined, 'butter')}
+                {statCard('TOTAL QUANTITY (PCS)', totalQuantity, 'var(--c-5c4033)', undefined, undefined, 'peach')}
+                {statCard('TOTAL SPENT', money(displayTotalCost), 'var(--c-bc6c25)', undefined, undefined, 'rose')}
+                {statCard('IN CHINA CUSTOMS', chinaCustomsStats.entries, 'var(--c-3a6ea5)', `${chinaCustomsStats.pcs} pcs`, undefined, 'sky')}
+                {statCard('IN TRANSIT TO PH', inTransitStats.entries, 'var(--c-bc6c25)', `${inTransitStats.pcs} pcs`, undefined, 'butter')}
+                {statCard('IN PH CUSTOMS', phCustomsStats.entries, 'var(--c-6a4c93)', `${phCustomsStats.pcs} pcs`, undefined, 'lilac')}
+                {statCard('PH HUB / OUT FOR DELIVERY', phHubStats.entries, 'var(--c-2d6a4f)', `${phHubStats.pcs} pcs`, undefined, 'mint')}
+                {statCard('DELIVERED', deliveredCount, 'var(--c-2d6a4f)', 'all orders, incl. archived', 'Standalone: counts every delivered order (archived too) and ignores the batch filter.', 'mint')}
+                {statCard('AVG SHIPPING DAYS', avgShippingDays !== '-' ? `${avgShippingDays} days` : '-', 'var(--c-7f5539)', 'all orders, incl. archived', 'Standalone: counts every order (archived too) and ignores the batch filter. Only permanently deleting an order removes it from this average.', 'sand')}
               </div>
             </div>
           </div>
 
           <div style={{ background: 'var(--c-fffdfa)', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', marginBottom: '25px', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid var(--c-f0e6df)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--c-fcf6f0)', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-              <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
-                <Package size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />General Order Tracker — {query ? 'All Batches' : selectedBatch} {query && `(Filtered by "${searchQuery}")`}
-              </h2>
+              <div style={{ textAlign: 'left' }}>
+                <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
+                  <Package size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />General Order Tracker — {query ? 'All Batches' : selectedBatch} {query && `(Filtered by "${searchQuery}")`}
+                </h2>
+                <span style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', fontWeight: '600', display: 'block', marginTop: '3px' }}>
+                  Showing {finalFilteredOrders.length} orders found
+                </span>
+              </div>
               
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 {selectedOrderIds.length > 0 && (
@@ -1620,7 +1644,6 @@ export default function App() {
                     <Archive size={14} /> Archive Delivered ({deliveredInView.length})
                   </button>
                 )}
-                <span style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', fontWeight: '600' }}>Showing {finalFilteredOrders.length} orders found</span>
               </div>
             </div>
 
@@ -1814,25 +1837,27 @@ export default function App() {
           <div style={{ background: 'var(--c-fffdfa)', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', border: '1px solid var(--c-f0e6df)', boxSizing: 'border-box', width: '100%' }}>
             <div style={{ background: 'var(--c-fcf6f0)', borderRadius: '12px', padding: '15px', border: '1px solid var(--c-e6ccb2)', width: '100%', boxSizing: 'border-box' }}>
               <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: 'var(--c-7f5539)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
-                <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Archive At A Glance ({archiveBatch})
+                <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Archives Dashboard ({archiveBatch})
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '15px', textAlign: 'center' }}>
-                {statCard('TOTAL ORDERS', archiveTotalOrders, 'var(--c-5c4033)')}
-                {statCard('TOTAL QUANTITY (PCS)', archiveTotalQty, 'var(--c-5c4033)')}
-                {statCard('TOTAL SPENT', money(archiveTotalSpent), 'var(--c-bc6c25)')}
-                {statCard('AVG SHIPPING DAYS', archiveAvgDays !== '-' ? `${archiveAvgDays} days` : '-', 'var(--c-7f5539)', 'all archived orders')}
+                {statCard('TOTAL ORDERS', archiveTotalOrders, 'var(--c-5c4033)', undefined, undefined, 'butter')}
+                {statCard('TOTAL QUANTITY (PCS)', archiveTotalQty, 'var(--c-5c4033)', undefined, undefined, 'peach')}
+                {statCard('TOTAL SPENT', money(archiveTotalSpent), 'var(--c-bc6c25)', undefined, undefined, 'rose')}
+                {statCard('AVG SHIPPING DAYS', archiveAvgDays !== '-' ? `${archiveAvgDays} days` : '-', 'var(--c-7f5539)', 'all archived orders', undefined, 'sky')}
               </div>
             </div>
           </div>
 
         <div style={{ background: 'var(--c-fffdfa)', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid var(--c-f0e6df)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--c-fcf6f0)', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-            <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
-              <Archive size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />Archived Orders — {query ? 'All Batches' : archiveBatch} {query && `(Filtered by "${searchQuery}")`}
-            </h2>
-            <span style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', fontWeight: '600' }}>
-              {finalFilteredArchive.length} archived · not counted in the General Orders dashboard
-            </span>
+            <div style={{ textAlign: 'left' }}>
+              <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
+                <Archive size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />Archived Orders — {query ? 'All Batches' : archiveBatch} {query && `(Filtered by "${searchQuery}")`}
+              </h2>
+              <span style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', fontWeight: '600', display: 'block', marginTop: '3px' }}>
+                {finalFilteredArchive.length} archived · not counted in the General Orders dashboard
+              </span>
+            </div>
           </div>
 
           <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1400px' }}>
@@ -1934,19 +1959,19 @@ export default function App() {
                 <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Wishlist Dashboard
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '15px', textAlign: 'center' }}>
-                <div style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+                <div style={tintBox('butter')}>
                   <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700' }}>INITIAL TOTAL</span>
                   <strong style={{ fontSize: '14px', color: 'var(--c-5c4033)' }}>₱{wishlistInitialTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                 </div>
-                <div style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+                <div style={tintBox('rose')}>
                   <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700' }}>LATEST TOTAL</span>
                   <strong style={{ fontSize: '14px', color: 'var(--c-bc6c25)' }}>₱{wishlistLatestTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                 </div>
-                <div style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+                <div style={tintBox('sky')}>
                   <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700', marginBottom: '4px' }}>PRICE FLAG</span>
                   {renderPriceFlag(1, wishlistInitialTotal, wishlistLatestTotal)}
                 </div>
-                <div style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+                <div style={tintBox('mint')}>
                   <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700' }}>ITEMS SAVED</span>
                   <strong style={{ fontSize: '14px', color: 'var(--c-7f5539)' }}>{wishlist.length}</strong>
                 </div>
@@ -1961,17 +1986,6 @@ export default function App() {
               </h2>
             
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                <div>
-                  <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px' }}>MOVE TO BATCH</span>
-                  <BatchPicker
-                    value={wishlistMoveBatch}
-                    onChange={setWishlistMoveBatch}
-                    batches={batchInfo}
-                    extras={[{ value: null, label: `Auto (${latestOrderBatch})` }]}
-                    compact
-                  />
-                </div>
-
                 {selectedWishlistIds.length > 0 && (
                   <button
                     onClick={() => handleMoveItemsToTracker(wishlist.filter(w => selectedWishlistIds.includes(w.id)))}
