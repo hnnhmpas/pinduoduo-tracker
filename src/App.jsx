@@ -11,7 +11,7 @@ import { BatchPicker, buildBatchInfo } from './BatchPicker.jsx';
 import {
   ShoppingBag, LogIn, Search, X, BookOpen, Truck, Archive, ArchiveRestore, Undo2,
   LayoutDashboard, Package, Heart, Pencil, Trash2, Check, ArrowDown, ArrowUp, ArrowRight,
-  ChevronDown, ChevronUp, ChevronLeft, ChevronRight
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Moon, Sun
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -34,6 +34,72 @@ const STRAWBERRY_CAT_URL = "https://i.imgur.com/VS9pglf.png";
 
 // Sentinel meaning "leave this field as it already is" in the batch editor
 const KEEP = '__keep__';
+
+
+/* ---------------------------------------------------------------------
+   GLOBAL SEARCH helpers
+   A query is split into words; every word must appear somewhere in the entry
+   (name, notes, batch, statuses, dates, quantity, prices...). Example: "gifting"
+   finds every order whose NOTES mention gifting, even if the item name doesn't.
+   --------------------------------------------------------------------- */
+const lc = (v) => (v == null ? '' : String(v).toLowerCase());
+
+const orderSearchFields = (o) => [
+  ['Name', o.name],
+  ['Notes', o.notes],
+  ['Batch', o.batch],
+  ['Shipping', o.shippingStatus],
+  ['Status', o.orderStatus === 'OK ✔' ? 'OK' : o.orderStatus],
+  ['Date ordered', o.date],
+  ['Delivered on', o.actualDeliveryDate],
+  ['Est. delivery', o.estDelivery],
+  ['Quantity', o.qty],
+  ['Cost', o.cost],
+  ['Total', (Number(o.qty) || 0) * (Number(o.cost) || 0)],
+];
+
+const wishlistSearchFields = (w) => [
+  ['Name', w.name],
+  ['Quantity', w.qty],
+  ['Initial price', w.initialCost],
+  ['Latest price', w.latestCost],
+];
+
+// -> { match, hits: [[label, value], ...] } where hits are the fields that contain a search word
+const matchFields = (fields, tokens) => {
+  if (tokens.length === 0) return { match: true, hits: [] };
+  const lowered = fields.map(([label, value]) => [label, value, lc(value)]);
+  const haystack = lowered.map(f => f[2]).join(' \u0001 ');
+  if (!tokens.every(t => haystack.includes(t))) return { match: false, hits: [] };
+  return {
+    match: true,
+    hits: lowered.filter(f => f[2] && tokens.some(t => f[2].includes(t))).map(f => [f[0], f[1]]),
+  };
+};
+
+// short excerpt around the first matching word
+const searchSnippet = (text, tokens) => {
+  const t = String(text);
+  if (t.length <= 70) return t;
+  const lower = t.toLowerCase();
+  const at = Math.min(...tokens.map(k => { const i = lower.indexOf(k); return i === -1 ? Infinity : i; }));
+  const start = Math.max(0, (Number.isFinite(at) ? at : 0) - 25);
+  return `${start > 0 ? '…' : ''}${t.slice(start, start + 70)}${start + 70 < t.length ? '…' : ''}`;
+};
+
+function Highlight({ text, query }) {
+  const t = text == null ? '' : String(text);
+  const tokens = (query || '').split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || t === '') return <>{t}</>;
+  const re = new RegExp(`(${tokens.map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+  return (
+    <>
+      {t.split(re).map((part, i) => (i % 2 === 1
+        ? <mark key={i} style={{ background: 'var(--c-ffd166)', color: 'var(--c-5c4033)', borderRadius: '3px', padding: '0 2px' }}>{part}</mark>
+        : part))}
+    </>
+  );
+}
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -155,6 +221,26 @@ export default function App() {
 
   // GLOBAL SEARCH STATE
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchBoxRef = useRef(null);
+  useEffect(() => {
+    const onDown = (e) => { if (searchBoxRef.current && !searchBoxRef.current.contains(e.target)) setSearchOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
+  // THEME (light / dark). Defaults to the device setting until the user picks one.
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem('pdd-theme');
+      if (saved === 'dark' || saved === 'light') return saved;
+    } catch (e) { /* storage unavailable */ }
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('pdd-theme', theme); } catch (e) { /* storage unavailable */ }
+  }, [theme]);
 
   // PAGINATION STATES FOR ORDERS
   const [ordersPage, setOrdersPage] = useState(1);
@@ -166,6 +252,8 @@ export default function App() {
 
   // PAGINATION STATES FOR ARCHIVE + UNDO TOAST FOR ARCHIVING
   const [archivePage, setArchivePage] = useState(1);
+  const [archiveBatch, setArchiveBatch] = useState('All Batches'); // batch filter for the Archive tab
+  const [archiveTabHover, setArchiveTabHover] = useState(false);   // Archive tab is icon-only until hovered / focused
   const [archivePerPage, setArchivePerPage] = useState(10);
   const [lastArchive, setLastArchive] = useState(null);
 
@@ -230,30 +318,30 @@ export default function App() {
   };
 
   const getButtonStyle = (variant = 'default', customBg, customColor) => {
-    let bg = customBg || '#f2e8cf';
-    let color = customColor || '#5c4033';
-    let border = '1px solid #ffd166';
+    let bg = customBg || 'var(--c-f2e8cf)';
+    let color = customColor || 'var(--c-5c4033)';
+    let border = '1px solid var(--c-ffd166)';
 
     if (variant === 'primary') {
-      bg = '#ffd166';
-      color = '#5c4033';
-      border = '1px solid #e6ccb2';
+      bg = 'var(--c-ffd166)';
+      color = 'var(--c-5c4033)';
+      border = '1px solid var(--c-e6ccb2)';
     } else if (variant === 'pink') {
-      bg = '#ffafcc';
-      color = '#5c4033';
-      border = '1px solid #ffc8dd';
+      bg = 'var(--c-ffafcc)';
+      color = 'var(--c-5c4033)';
+      border = '1px solid var(--c-ffc8dd)';
     } else if (variant === 'blue') {
-      bg = '#bde0fe';
-      color = '#03045e';
-      border = '1px solid #90e0ef';
+      bg = 'var(--c-bde0fe)';
+      color = 'var(--c-03045e)';
+      border = '1px solid var(--c-90e0ef)';
     } else if (variant === 'danger') {
-      bg = '#ffccd5';
-      color = '#780000';
-      border = '1px solid #ffb3c1';
+      bg = 'var(--c-ffccd5)';
+      color = 'var(--c-780000)';
+      border = '1px solid var(--c-ffb3c1)';
     } else if (variant === 'light') {
-      bg = '#fffdfa';
-      color = '#7f5539';
-      border = '1px solid #e6ccb2';
+      bg = 'var(--c-fffdfa)';
+      color = 'var(--c-7f5539)';
+      border = '1px solid var(--c-e6ccb2)';
     }
 
     return {
@@ -265,7 +353,7 @@ export default function App() {
       fontWeight: '700',
       fontSize: '12px',
       cursor: 'pointer',
-      boxShadow: '0 3px 0 rgba(199, 175, 150, 0.4)',
+      boxShadow: '0 3px 0 rgba(var(--shadow-btn-rgb), 0.4)',
       transition: 'all 0.1s ease',
       display: 'inline-flex',
       alignItems: 'center',
@@ -278,19 +366,19 @@ export default function App() {
   };
 
   const getShippingBadgeStyle = (status) => {
-    let bg = '#ffffff';
-    let color = '#5c4033';
+    let bg = 'var(--c-ffffff)';
+    let color = 'var(--c-5c4033)';
     
     switch(status) {
-      case 'Ordered': bg = '#ffffff'; color = '#5c4033'; break;
-      case 'At China Warehouse': bg = '#ffcfc9'; color = '#5c4033'; break;
-      case 'Dispatched / China Customs': bg = '#c9daf8'; color = '#03045e'; break;
-      case 'In Transit to PH': bg = '#fdd6a8'; color = '#5c4033'; break;
-      case 'PH Customs Clearance': bg = '#e6cff2'; color = '#3c096c'; break;
-      case 'PH Hub / Out for Local Delivery': bg = '#fcf2cd'; color = '#5c4033'; break;
-      case 'Delivered': bg = '#d4edbc'; color = '#1b4332'; break;
-      case 'Undelivered': bg = '#e37373'; color = '#ffffff'; break;
-      default: bg = '#ffffff'; color = '#5c4033';
+      case 'Ordered': bg = 'var(--c-ffffff)'; color = 'var(--c-5c4033)'; break;
+      case 'At China Warehouse': bg = 'var(--c-ffcfc9)'; color = 'var(--c-5c4033)'; break;
+      case 'Dispatched / China Customs': bg = 'var(--c-c9daf8)'; color = 'var(--c-03045e)'; break;
+      case 'In Transit to PH': bg = 'var(--c-fdd6a8)'; color = 'var(--c-5c4033)'; break;
+      case 'PH Customs Clearance': bg = 'var(--c-e6cff2)'; color = 'var(--c-3c096c)'; break;
+      case 'PH Hub / Out for Local Delivery': bg = 'var(--c-fcf2cd)'; color = 'var(--c-5c4033)'; break;
+      case 'Delivered': bg = 'var(--c-d4edbc)'; color = 'var(--c-1b4332)'; break;
+      case 'Undelivered': bg = 'var(--c-e37373)'; color = 'var(--c-ffffff)'; break;
+      default: bg = 'var(--c-ffffff)'; color = 'var(--c-5c4033)';
     }
 
     return {
@@ -321,19 +409,19 @@ export default function App() {
 
     if (diff > 0) {
       return (
-        <span style={{ background: '#d8f3dc', color: '#1b4332', padding: '4px 10px', borderRadius: '9999px', fontWeight: 'bold', fontSize: '11px', whiteSpace: 'nowrap', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
+        <span style={{ background: 'var(--c-d8f3dc)', color: 'var(--c-1b4332)', padding: '4px 10px', borderRadius: '9999px', fontWeight: 'bold', fontSize: '11px', whiteSpace: 'nowrap', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
           <ArrowDown size={12} strokeWidth={3} style={{ verticalAlign: '-2px', marginRight: '3px' }} />₱{diff.toFixed(2)} SAVED!
         </span>
       );
     } else if (diff < 0) {
       return (
-        <span style={{ background: '#ffccd5', color: '#780000', padding: '4px 10px', borderRadius: '9999px', fontWeight: 'bold', fontSize: '11px', whiteSpace: 'nowrap', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
+        <span style={{ background: 'var(--c-ffccd5)', color: 'var(--c-780000)', padding: '4px 10px', borderRadius: '9999px', fontWeight: 'bold', fontSize: '11px', whiteSpace: 'nowrap', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
           <ArrowUp size={12} strokeWidth={3} style={{ verticalAlign: '-2px', marginRight: '3px' }} />₱{Math.abs(diff).toFixed(2)} INCREASE!
         </span>
       );
     }
     return (
-      <span style={{ background: '#fcf6f0', color: '#8c7a6b', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
+      <span style={{ background: 'var(--c-fcf6f0)', color: 'var(--c-8c7a6b)', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
         SAME
       </span>
     );
@@ -611,6 +699,7 @@ export default function App() {
   const latestOrderBatch = getLatestOrderBatch();
   // Every batch that exists on a real order (archived included), with open/finished status
   const batchInfo = buildBatchInfo(orders);
+  const archiveBatchInfo = buildBatchInfo(orders.filter(o => o.archived));
   const effectiveMoveBatch = wishlistMoveBatch || latestOrderBatch;
 
   // Move one or many wishlist items into General Orders (stays on the Wishlist tab)
@@ -691,25 +780,37 @@ export default function App() {
     ? ordersForView 
     : ordersForView.filter(o => o.batch === selectedBatch);
 
+  // Searching is GLOBAL: while a query is active it looks through every field of every entry
+  // (orders, archive and wishlist), and the batch filter doesn't hide matches.
+  const searchTokens = query ? query.split(/\s+/).filter(Boolean) : [];
+  const orderMatches = (o) => matchFields(orderSearchFields(o), searchTokens).match;
+
   const finalFilteredOrders = query 
-    ? batchFilteredOrders.filter(o => o.name.toLowerCase().includes(query))
+    ? ordersForView.filter(orderMatches)
     : batchFilteredOrders;
 
   const displayTotalCost = finalFilteredOrders.reduce((acc, item) => acc + (item.qty * item.cost), 0);
 
   const finalFilteredWishlist = query
-    ? wishlistForView.filter(item => item.name.toLowerCase().includes(query))
+    ? wishlistForView.filter(item => matchFields(wishlistSearchFields(item), searchTokens).match)
     : wishlistForView;
 
-  const allEntries = [
-    ...activeOrders.map(o => ({ name: o.name, type: 'Order', tab: 'orders' })),
-    ...archivedOrders.map(o => ({ name: o.name, type: 'Archived', tab: 'archive' })),
-    ...wishlist.map(w => ({ name: w.name, type: 'Wishlist', tab: 'wishlist' }))
-  ];
-
-  const suggestions = query 
-    ? allEntries.filter(entry => entry.name.toLowerCase().startsWith(query)).slice(0, 5)
-    : [];
+  // Results for the search dropdown, across all three sections
+  const searchResults = query ? [
+    ...activeOrders.map(o => ({ tab: 'orders', type: 'Order', key: `o-${o.id}`, title: o.name, ...matchFields(orderSearchFields(o), searchTokens) })),
+    ...archivedOrders.map(o => ({ tab: 'archive', type: 'Archived', key: `a-${o.id}`, title: o.name, ...matchFields(orderSearchFields(o), searchTokens) })),
+    ...wishlist.map(w => ({ tab: 'wishlist', type: 'Wishlist', key: `w-${w.id}`, title: w.name, ...matchFields(wishlistSearchFields(w), searchTokens) })),
+  ].filter(r => r.match) : [];
+  const searchCounts = {
+    orders: searchResults.filter(r => r.tab === 'orders').length,
+    archive: searchResults.filter(r => r.tab === 'archive').length,
+    wishlist: searchResults.filter(r => r.tab === 'wishlist').length,
+  };
+  // small count bubble on a tab while searching
+  const archiveTabExpanded = archiveTabHover || (tourPhase === 'running' && TOUR_STEPS[tourStepIndex].target === 'tab-archive');
+  const foundPill = (n) => (query ? (
+    <span title={`${n} matching`} style={{ background: n > 0 ? 'var(--c-ffd166)' : 'var(--c-fcf6f0)', color: n > 0 ? 'var(--c-5c4033)' : 'var(--c-b0a499)', borderRadius: '9999px', padding: '1px 7px', fontSize: '10px', fontWeight: 700, marginLeft: '2px' }}>{n}</span>
+  ) : null);
 
   const totalOrdersPages = Math.ceil(finalFilteredOrders.length / ordersPerPage) || 1;
   const currentOrdersSlice = finalFilteredOrders.slice(
@@ -724,8 +825,8 @@ export default function App() {
   );
 
   const finalFilteredArchive = query
-    ? archivedForView.filter(o => o.name.toLowerCase().includes(query))
-    : archivedForView;
+    ? archivedForView.filter(orderMatches)
+    : (archiveBatch === 'All Batches' ? archivedForView : archivedForView.filter(o => o.batch === archiveBatch));
   const totalArchivePages = Math.ceil(finalFilteredArchive.length / archivePerPage) || 1;
   const currentArchiveSlice = finalFilteredArchive.slice(
     (archivePage - 1) * archivePerPage,
@@ -765,10 +866,28 @@ export default function App() {
   const phCustomsStats = statusStats('PH Customs Clearance');
   const phHubStats = statusStats('PH Hub / Out for Local Delivery');
 
-  const shippingDaysList = batchFilteredOrders.map(o => calculateActualShippingDays(o.date, o.actualDeliveryDate)).filter(d => d !== null);
-  const avgShippingDays = shippingDaysList.length > 0 
-    ? Math.round(shippingDaysList.reduce((a, b) => a + b, 0) / shippingDaysList.length) 
-    : '-';
+  // Average shipping days is STANDALONE: every real order counts (archived ones too) and the batch filter is ignored.
+  // It only changes when an order gets its delivery date edited or is permanently deleted.
+  const averageDays = (list) => {
+    const days = list.map(o => calculateActualShippingDays(o.date, o.actualDeliveryDate)).filter(d => d !== null);
+    return days.length > 0 ? Math.round(days.reduce((a, b) => a + b, 0) / days.length) : '-';
+  };
+  const avgShippingDays = averageDays(orders);
+
+  // Archive dashboard (archived orders only; includes the tour's sample row while the tour shows it)
+  const archiveBatchView = archiveBatch === 'All Batches' ? archivedForView : archivedForView.filter(o => o.batch === archiveBatch);
+  const archiveTotalOrders = archiveBatchView.length;
+  const archiveTotalQty = archiveBatchView.reduce((acc, o) => acc + (Number(o.qty) || 0), 0);
+  const archiveTotalSpent = archiveBatchView.reduce((acc, o) => acc + (Number(o.qty) || 0) * (Number(o.cost) || 0), 0);
+  const archiveAvgDays = averageDays(archivedForView);
+  const money = (n) => `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const statCard = (label, value, color, sub, title) => (
+    <div key={label} title={title} style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+      <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700' }}>{label}</span>
+      <strong style={{ fontSize: '16px', color }}>{value}</strong>
+      {sub != null && <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', marginTop: '2px' }}>{sub}</span>}
+    </div>
+  );
 
   const renderPagination = (currentPage, totalPages, setPage, perPage, setPerPage) => {
     const pageNumbers = [];
@@ -788,7 +907,7 @@ export default function App() {
               {num}
             </button>
           ))}
-          <span style={{ color: '#8c7a6b', marginLeft: '5px' }}>records per page</span>
+          <span style={{ color: 'var(--c-8c7a6b)', marginLeft: '5px' }}>records per page</span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -837,6 +956,10 @@ export default function App() {
   // Keep page numbers valid when archiving / restoring shrinks or grows a list
   useEffect(() => { if (ordersPage > totalOrdersPages) setOrdersPage(totalOrdersPages); }, [ordersPage, totalOrdersPages]);
   useEffect(() => { if (archivePage > totalArchivePages) setArchivePage(totalArchivePages); }, [archivePage, totalArchivePages]);
+  // if the last order of the chosen archive batch gets restored/deleted, fall back to All Batches
+  useEffect(() => {
+    if (archiveBatch !== 'All Batches' && !archivedOrders.some(o => o.batch === archiveBatch)) setArchiveBatch('All Batches');
+  }, [archiveBatch, archivedOrders]);
 
   const resetTourDropdowns = () => {
     setModalBatchOpen(false);
@@ -913,11 +1036,12 @@ export default function App() {
 
   // Language picked in the welcome prompt -> remember the user's current view, then start the spotlight steps
   const startTourSteps = (lang) => {
-    tourViewSnapshotRef.current = { activeTab, selectedBatch, searchQuery, ordersPage, wishlistPage, selectedOrderIds, selectedWishlistIds };
+    tourViewSnapshotRef.current = { activeTab, selectedBatch, archiveBatch, searchQuery, ordersPage, wishlistPage, selectedOrderIds, selectedWishlistIds };
     prevTourModalRef.current = null;
     setTourLang(lang);
     setSearchQuery('');
     setSelectedBatch('All Batches');
+    setArchiveBatch('All Batches');
     setOrdersPage(1);
     setWishlistPage(1);
     setSelectedOrderIds([]);
@@ -941,6 +1065,7 @@ export default function App() {
     if (snap) {
       setActiveTab(snap.activeTab);
       setSelectedBatch(snap.selectedBatch);
+      setArchiveBatch(snap.archiveBatch);
       setSearchQuery(snap.searchQuery);
       setOrdersPage(snap.ordersPage);
       setWishlistPage(snap.wishlistPage);
@@ -1075,7 +1200,7 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#fdfbf7', color: '#7f5539', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--c-fdfbf7)', color: 'var(--c-7f5539)', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
         <ShoppingBag size={22} style={{ marginRight: '10px' }} /> Loading your cozy space...
       </div>
     );
@@ -1090,7 +1215,7 @@ export default function App() {
         alignItems: 'center',
         minHeight: '100vh',
         width: '100vw',
-        background: '#fdfbf7',
+        background: 'var(--c-fdfbf7)',
         fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
         boxSizing: 'border-box',
         padding: '20px',
@@ -1101,20 +1226,20 @@ export default function App() {
         <div style={{ position: 'relative', width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           
           <div style={{
-            background: '#fffdfa',
+            background: 'var(--c-fffdfa)',
             padding: '35px 30px 30px 30px',
             borderRadius: '20px',
-            boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)',
-            borderTop: '6px solid #ffd166',
-            border: '1px solid #e6ccb2',
+            boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.4)',
+            borderTop: '6px solid var(--c-ffd166)',
+            border: '1px solid var(--c-e6ccb2)',
             width: '100%',
             textAlign: 'center',
             boxSizing: 'border-box'
           }}>
-            <h1 style={{ margin: '0 0 10px 0', color: '#7f5539', fontSize: '24px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+            <h1 style={{ margin: '0 0 10px 0', color: 'var(--c-7f5539)', fontSize: '24px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
               <ShoppingBag size={26} /> Pinduoduo Tracker
             </h1>
-            <p style={{ fontSize: '12px', color: '#8c7a6b', marginBottom: '25px', lineHeight: '1.5' }}>
+            <p style={{ fontSize: '12px', color: 'var(--c-8c7a6b)', marginBottom: '25px', lineHeight: '1.5' }}>
               Sign in with your Google account to access your private order tracker and real-time cloud syncing!
             </p>
             <button
@@ -1137,7 +1262,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#fdfbf7', color: '#7f5539', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--c-fdfbf7)', color: 'var(--c-7f5539)', fontFamily: "'Segoe UI', Roboto, sans-serif", fontSize: '16px', fontWeight: 'bold' }}>
         <ShoppingBag size={22} style={{ marginRight: '10px' }} /> Connecting to Cloud Sync...
       </div>
     );
@@ -1148,7 +1273,7 @@ export default function App() {
       margin: 0, 
       padding: '20px', 
       fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif", 
-      background: '#fdfbf7', 
+      background: 'var(--c-fdfbf7)', 
       minHeight: '100vh', 
       width: '100vw', 
       maxWidth: '100vw',
@@ -1160,7 +1285,7 @@ export default function App() {
     }}>
       
       {/* HEADER */}
-      <header style={{ display: 'flex', flexDirection: 'column', gap: '15px', background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.35)', marginBottom: '22px', borderTop: '4px solid #ffd166', width: '100%', boxSizing: 'border-box', border: '1px solid #f0e6df' }}>
+      <header style={{ display: 'flex', flexDirection: 'column', gap: '15px', background: 'var(--c-fffdfa)', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.35)', marginBottom: '22px', borderTop: '4px solid var(--c-ffd166)', width: '100%', boxSizing: 'border-box', border: '1px solid var(--c-f0e6df)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px', width: '100%' }}>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -1171,7 +1296,7 @@ export default function App() {
                 setSearchQuery('');
                 setOrdersPage(1);
               }}
-              style={{ margin: 0, color: '#7f5539', fontSize: '22px', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '700', cursor: 'pointer' }}
+              style={{ margin: 0, color: 'var(--c-7f5539)', fontSize: '22px', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '700', cursor: 'pointer' }}
               title="Click to go to Home / General Orders"
             >
               <ShoppingBag size={22} /> Pinduoduo Tracker
@@ -1180,55 +1305,89 @@ export default function App() {
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             
-            <div style={{ position: 'relative' }}>
-              <div style={{ display: 'flex', alignItems: 'center', background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '9999px', padding: '6px 14px', width: '250px', boxSizing: 'border-box', boxShadow: '0 2px 0 rgba(199, 175, 150, 0.2)' }}>
-                <Search size={14} color="#7f5539" style={{ marginRight: '8px', flexShrink: 0 }} />
+            <div style={{ position: 'relative' }} ref={searchBoxRef}>
+              <div style={{ display: 'flex', alignItems: 'center', background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '9999px', padding: '6px 14px', width: '250px', boxSizing: 'border-box', boxShadow: '0 2px 0 rgba(var(--shadow-btn-rgb), 0.2)' }}>
+                <Search size={14} style={{ marginRight: '8px', flexShrink: 0, color: 'var(--c-7f5539)' }} />
                 <input 
                   type="text" 
                   value={searchQuery}
-                  onChange={(e) => { setSearchQuery(e.target.value); setOrdersPage(1); setWishlistPage(1); }}
-                  placeholder="Search tracker..." 
-                  style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', width: '100%', color: '#5c4033' }}
+                  onChange={(e) => { setSearchQuery(e.target.value); setOrdersPage(1); setWishlistPage(1); setArchivePage(1); setSearchOpen(true); }}
+                  onFocus={() => setSearchOpen(true)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') setSearchOpen(false); }}
+                  placeholder="Search all entries & notes..." 
+                  style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', width: '100%', color: 'var(--c-5c4033)' }}
                 />
                 {searchQuery && (
                   <button 
-                    onClick={() => setSearchQuery('')}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#b0a499', padding: 0 }}
+                    onClick={() => { setSearchQuery(''); setSearchOpen(false); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: 'var(--c-b0a499)', padding: 0 }}
                   >
                     <X size={13} />
                   </button>
                 )}
               </div>
 
-              {suggestions.length > 0 && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', borderRadius: '12px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', border: '1px solid #e6ccb2', marginTop: '6px', zIndex: 100, overflow: 'hidden' }}>
-                  <div style={{ padding: '6px 10px', fontSize: '10px', background: '#ffccd5', color: '#5c4033', fontWeight: '700' }}>
-                    SUGGESTED ITEMS FOR "{searchQuery.toUpperCase()}"
+              {searchOpen && query && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, width: '340px', maxWidth: '88vw', background: 'var(--c-fffdfa)', borderRadius: '12px', boxShadow: '0 8px 24px rgba(var(--shadow-rgb), 0.5)', border: '1px solid var(--c-e6ccb2)', marginTop: '6px', zIndex: 2000, overflow: 'hidden', textAlign: 'left' }}>
+                  <div style={{ padding: '7px 12px', fontSize: '10px', background: 'var(--c-ffccd5)', color: 'var(--c-5c4033)', fontWeight: '700', letterSpacing: '0.4px' }}>
+                    {searchResults.length} {searchResults.length === 1 ? 'RESULT' : 'RESULTS'} FOR "{searchQuery.toUpperCase()}"
                   </div>
-                  {suggestions.map((item, idx) => (
-                    <div 
-                      key={idx}
-                      onClick={() => {
-                        setSearchQuery(item.name);
-                        setActiveTab(item.tab);
-                        setArchivePage(1);
-                        setOrdersPage(1);
-                        setWishlistPage(1);
-                      }}
-                      style={{ padding: '8px 12px', fontSize: '12px', cursor: 'pointer', borderBottom: '1px solid #fcf6f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = '#fcf6f0'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
-                    >
-                      <span style={{ color: '#5c4033', fontWeight: '500' }}>{item.name}</span>
-                      <span style={{ fontSize: '10px', background: item.tab === 'orders' ? '#bde0fe' : '#ffccd5', color: item.tab === 'orders' ? '#03045e' : '#5c4033', padding: '2px 6px', borderRadius: '4px' }}>
-                        {item.type}
-                      </span>
-                    </div>
-                  ))}
+                  <div style={{ display: 'flex', gap: '6px', padding: '8px 10px', flexWrap: 'wrap', borderBottom: '1px solid var(--c-fcf6f0)' }}>
+                    {[['orders', 'General Orders'], ['archive', 'Archive'], ['wishlist', 'Wishlist']].map(([tab, label]) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => { setActiveTab(tab); setSearchOpen(false); }}
+                        style={{ background: activeTab === tab ? 'var(--c-ffd166)' : 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', border: '1px solid var(--c-e6ccb2)', borderRadius: '9999px', padding: '3px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+                      >
+                        {label} · {searchCounts[tab]}
+                      </button>
+                    ))}
+                  </div>
+                  {searchResults.length === 0 && (
+                    <div style={{ padding: '14px 12px', fontSize: '12px', color: 'var(--c-8c7a6b)' }}>Nothing found in names, notes, batches, statuses or dates.</div>
+                  )}
+                  <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                    {searchResults.slice(0, 8).map((r) => {
+                      const other = r.hits.find(h => h[0] !== 'Name');
+                      return (
+                        <div
+                          key={r.key}
+                          onClick={() => { setActiveTab(r.tab); setSearchOpen(false); setOrdersPage(1); setWishlistPage(1); setArchivePage(1); }}
+                          style={{ padding: '8px 12px', fontSize: '12px', cursor: 'pointer', borderBottom: '1px solid var(--c-fcf6f0)' }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--c-fcf6f0)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ color: 'var(--c-5c4033)', fontWeight: '600', wordBreak: 'break-word' }}><Highlight text={r.title} query={query} /></span>
+                            <span style={{ fontSize: '10px', background: r.tab === 'orders' ? 'var(--c-bde0fe)' : r.tab === 'archive' ? 'var(--c-d8f3dc)' : 'var(--c-ffccd5)', color: r.tab === 'orders' ? 'var(--c-03045e)' : r.tab === 'archive' ? 'var(--c-1b4332)' : 'var(--c-780000)', padding: '2px 7px', borderRadius: '9999px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                              {r.type}
+                            </span>
+                          </div>
+                          {other && (
+                            <div style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', marginTop: '3px', wordBreak: 'break-word' }}>
+                              <span style={{ fontWeight: 700 }}>{other[0]}:</span> <Highlight text={searchSnippet(other[1], searchTokens)} query={query} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {searchResults.length > 8 && (
+                      <div style={{ padding: '8px 12px', fontSize: '11px', color: 'var(--c-8c7a6b)' }}>+ {searchResults.length - 8} more shown in the tables</div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
 
+            <button
+              onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+              style={getButtonStyle('light')}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />} {theme === 'dark' ? 'Light' : 'Dark'}
+            </button>
             <button
               data-tour="help-btn"
               onClick={openTour}
@@ -1256,14 +1415,14 @@ export default function App() {
               <button
                 onClick={() => setIsAccountMenuOpen(prev => !prev)}
                 style={{
-                  background: '#ffd166',
-                  border: '1.5px solid #ffd166',
+                  background: 'var(--c-ffd166)',
+                  border: '1.5px solid var(--c-ffd166)',
                   borderRadius: '50%',
                   width: '36px',
                   height: '36px',
                   padding: 0,
                   cursor: 'pointer',
-                  boxShadow: '0 3px 0 rgba(199, 175, 150, 0.4)',
+                  boxShadow: '0 3px 0 rgba(var(--shadow-btn-rgb), 0.4)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -1285,10 +1444,10 @@ export default function App() {
                   top: '120%',
                   right: 0,
                   width: '300px',
-                  background: '#fffdfa',
-                  border: '1px solid #e6ccb2',
+                  background: 'var(--c-fffdfa)',
+                  border: '1px solid var(--c-e6ccb2)',
                   borderRadius: '16px',
-                  boxShadow: '0 10px 30px rgba(230, 204, 178, 0.5)',
+                  boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.5)',
                   zIndex: 300,
                   padding: '18px',
                   boxSizing: 'border-box',
@@ -1299,21 +1458,21 @@ export default function App() {
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-10px' }}>
                     <button 
                       onClick={() => setIsAccountMenuOpen(false)}
-                      style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: 'var(--c-7f5539)', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     >
                       <X size={14} style={{ display: 'block', margin: '0 auto' }} />
                     </button>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <div style={{ width: '50px', height: '50px', borderRadius: '50%', overflow: 'hidden', border: '1.5px solid #ffd166', background: '#ffd166', flexShrink: '0' }}>
+                    <div style={{ width: '50px', height: '50px', borderRadius: '50%', overflow: 'hidden', border: '1.5px solid var(--c-ffd166)', background: 'var(--c-ffd166)', flexShrink: '0' }}>
                       <img src={STRAWBERRY_CAT_URL} alt="Strawberry Cat" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', textAlign: 'left', gap: '2px' }}>
-                      <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#5c4033', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--c-5c4033)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {user.displayName || 'Pinduoduo User'}
                       </span>
-                      <span style={{ fontSize: '11px', color: '#8c7a6b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {user.email}
                       </span>
                     </div>
@@ -1338,41 +1497,74 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px', background: '#fcf6f0', padding: '12px 18px', borderRadius: '12px', border: '1px solid #e6ccb2', width: '100%', boxSizing: 'border-box' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px', background: 'var(--c-fcf6f0)', padding: '12px 18px', borderRadius: '12px', border: '1px solid var(--c-e6ccb2)', width: '100%', boxSizing: 'border-box' }}>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button
               onClick={() => setActiveTab('orders')}
               style={getButtonStyle(activeTab === 'orders' ? 'primary' : 'light')}
             >
-              General Orders ({activeOrders.length})
+              <Package size={14} /> General Orders ({activeOrders.length}){foundPill(searchCounts.orders)}
             </button>
             <button
               data-tour="tab-wishlist"
               onClick={() => setActiveTab('wishlist')}
               style={getButtonStyle(activeTab === 'wishlist' ? 'primary' : 'light')}
             >
-              Wishlist ({wishlist.length})
+              <Heart size={14} /> Wishlist ({wishlist.length}){foundPill(searchCounts.wishlist)}
             </button>
+            {/* Archive tab: icon only until hovered/focused (and while the tour is pointing at it) */}
             <button
               data-tour="tab-archive"
               onClick={() => setActiveTab('archive')}
-              style={getButtonStyle(activeTab === 'archive' ? 'primary' : 'light')}
+              onMouseEnter={() => setArchiveTabHover(true)}
+              onMouseLeave={() => setArchiveTabHover(false)}
+              onFocus={() => setArchiveTabHover(true)}
+              onBlur={() => setArchiveTabHover(false)}
+              title="Archive"
+              aria-label={`Archive (${archivedOrders.length})`}
+              style={{ ...getButtonStyle(activeTab === 'archive' ? 'primary' : 'light'), gap: 0, padding: '8px 12px', position: 'relative' }}
             >
-              <Archive size={14} /> Archive ({archivedOrders.length})
+              <Archive size={14} />
+              <span
+                style={{
+                  display: 'inline-flex', alignItems: 'center', overflow: 'hidden', whiteSpace: 'nowrap',
+                  maxWidth: archiveTabExpanded ? '170px' : '0px', opacity: archiveTabExpanded ? 1 : 0,
+                  marginLeft: archiveTabExpanded ? '6px' : '0px',
+                  transition: 'max-width 0.28s ease, opacity 0.2s ease, margin-left 0.28s ease',
+                }}
+              >
+                Archive ({archivedOrders.length}){foundPill(searchCounts.archive)}
+              </span>
+              {query && !archiveTabExpanded && (
+                <span style={{ position: 'absolute', top: '-7px', right: '-7px', minWidth: '16px', height: '16px', boxSizing: 'border-box', padding: '0 4px', borderRadius: '9999px', background: searchCounts.archive > 0 ? 'var(--c-ffd166)' : 'var(--c-fcf6f0)', color: searchCounts.archive > 0 ? 'var(--c-5c4033)' : 'var(--c-b0a499)', border: '1px solid var(--c-e6ccb2)', fontSize: '9px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {searchCounts.archive}
+                </span>
+              )}
             </button>
           </div>
 
-          {activeTab === 'orders' && (
+          {(activeTab === 'orders' || activeTab === 'archive') && (
             <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
               <div data-tour="batch-filter">
-                <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px' }}>BATCH FILTER</span>
-                <BatchPicker
-                  value={selectedBatch}
-                  onChange={(b) => { setSelectedBatch(b); setOrdersPage(1); }}
-                  batches={batchInfo}
-                  extras={[{ value: 'All Batches', label: 'All Batches' }]}
-                  allowCreate={false}
-                />
+                <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px' }}>BATCH FILTER</span>
+                {activeTab === 'archive' ? (
+                  <BatchPicker
+                    value={archiveBatch}
+                    onChange={(b) => { setArchiveBatch(b); setArchivePage(1); }}
+                    batches={archiveBatchInfo}
+                    extras={[{ value: 'All Batches', label: 'All Batches' }]}
+                    allowCreate={false}
+                    mode="archive"
+                  />
+                ) : (
+                  <BatchPicker
+                    value={selectedBatch}
+                    onChange={(b) => { setSelectedBatch(b); setOrdersPage(1); }}
+                    batches={batchInfo}
+                    extras={[{ value: 'All Batches', label: 'All Batches' }]}
+                    allowCreate={false}
+                  />
+                )}
               </div>
             </div>
           )}
@@ -1383,60 +1575,29 @@ export default function App() {
       {activeTab === 'orders' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', boxSizing: 'border-box' }}>
           
-          <div style={{ background: '#fffdfa', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', border: '1px solid #f0e6df', boxSizing: 'border-box', width: '100%' }}>
-            <div style={{ background: '#fcf6f0', borderRadius: '12px', padding: '15px', border: '1px solid #e6ccb2', width: '100%', boxSizing: 'border-box' }}>
-              <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: '#7f5539', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
+          <div style={{ background: 'var(--c-fffdfa)', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', border: '1px solid var(--c-f0e6df)', boxSizing: 'border-box', width: '100%' }}>
+            <div style={{ background: 'var(--c-fcf6f0)', borderRadius: '12px', padding: '15px', border: '1px solid var(--c-e6ccb2)', width: '100%', boxSizing: 'border-box' }}>
+              <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: 'var(--c-7f5539)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
                 <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Orders At A Glance ({selectedBatch})
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '15px', textAlign: 'center' }}>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>TOTAL ORDERS</span>
-                  <strong style={{ fontSize: '16px', color: '#5c4033' }}>{totalOrdersCount}</strong>
-                </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>TOTAL QUANTITY (PCS)</span>
-                  <strong style={{ fontSize: '16px', color: '#5c4033' }}>{totalQuantity}</strong>
-                </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>TOTAL SPENT</span>
-                  <strong style={{ fontSize: '16px', color: '#bc6c25' }}>₱{displayTotalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-                </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>DELIVERED</span>
-                  <strong style={{ fontSize: '16px', color: '#2d6a4f' }}>{deliveredCount}</strong>
-                </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>IN CHINA CUSTOMS</span>
-                  <strong style={{ fontSize: '16px', color: '#3a6ea5' }}>{chinaCustomsStats.entries}</strong>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', marginTop: '2px' }}>{chinaCustomsStats.pcs} pcs</span>
-                </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>IN TRANSIT TO PH</span>
-                  <strong style={{ fontSize: '16px', color: '#bc6c25' }}>{inTransitStats.entries}</strong>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', marginTop: '2px' }}>{inTransitStats.pcs} pcs</span>
-                </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>IN PH CUSTOMS</span>
-                  <strong style={{ fontSize: '16px', color: '#6a4c93' }}>{phCustomsStats.entries}</strong>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', marginTop: '2px' }}>{phCustomsStats.pcs} pcs</span>
-                </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>PH HUB / OUT FOR DELIVERY</span>
-                  <strong style={{ fontSize: '16px', color: '#2d6a4f' }}>{phHubStats.entries}</strong>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', marginTop: '2px' }}>{phHubStats.pcs} pcs</span>
-                </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>AVG SHIPPING DAYS</span>
-                  <strong style={{ fontSize: '16px', color: '#7f5539' }}>{avgShippingDays !== '-' ? `${avgShippingDays} days` : '-'}</strong>
-                </div>
+                {statCard('TOTAL ORDERS', totalOrdersCount, 'var(--c-5c4033)')}
+                {statCard('TOTAL QUANTITY (PCS)', totalQuantity, 'var(--c-5c4033)')}
+                {statCard('TOTAL SPENT', money(displayTotalCost), 'var(--c-bc6c25)')}
+                {statCard('IN CHINA CUSTOMS', chinaCustomsStats.entries, 'var(--c-3a6ea5)', `${chinaCustomsStats.pcs} pcs`)}
+                {statCard('IN TRANSIT TO PH', inTransitStats.entries, 'var(--c-bc6c25)', `${inTransitStats.pcs} pcs`)}
+                {statCard('IN PH CUSTOMS', phCustomsStats.entries, 'var(--c-6a4c93)', `${phCustomsStats.pcs} pcs`)}
+                {statCard('PH HUB / OUT FOR DELIVERY', phHubStats.entries, 'var(--c-2d6a4f)', `${phHubStats.pcs} pcs`)}
+                {statCard('DELIVERED', deliveredCount, 'var(--c-2d6a4f)')}
+                {statCard('AVG SHIPPING DAYS', avgShippingDays !== '-' ? `${avgShippingDays} days` : '-', 'var(--c-7f5539)', 'all orders, incl. archived', 'Standalone: counts every order (archived too) and ignores the batch filter. Only permanently deleting an order removes it from this average.')}
               </div>
             </div>
           </div>
 
-          <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', marginBottom: '25px', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-              <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
-                <Package size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />General Order Tracker — {selectedBatch} {query && `(Filtered by "${searchQuery}")`}
+          <div style={{ background: 'var(--c-fffdfa)', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', marginBottom: '25px', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid var(--c-f0e6df)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--c-fcf6f0)', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+              <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
+                <Package size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />General Order Tracker — {query ? 'All Batches' : selectedBatch} {query && `(Filtered by "${searchQuery}")`}
               </h2>
               
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1459,7 +1620,7 @@ export default function App() {
                     <Archive size={14} /> Archive Delivered ({deliveredInView.length})
                   </button>
                 )}
-                <span style={{ fontSize: '11px', color: '#8c7a6b', fontWeight: '600' }}>Showing {finalFilteredOrders.length} orders found</span>
+                <span style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', fontWeight: '600' }}>Showing {finalFilteredOrders.length} orders found</span>
               </div>
             </div>
 
@@ -1481,7 +1642,7 @@ export default function App() {
                 <col style={{ width: '12%' }} />
               </colgroup>
               <thead>
-                <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
+                <tr style={{ background: 'var(--c-fcf6f0)', color: 'var(--c-7f5539)' }}>
                   <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>
                     {/* CUSTOM COZY CHECKBOX FOR SELECT ALL */}
                     <div 
@@ -1499,14 +1660,14 @@ export default function App() {
                         width: '16px',
                         height: '16px',
                         borderRadius: '4px',
-                        border: '1.5px solid #e6ccb2',
-                        background: (currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id))) ? '#ffd166' : '#fffdfa',
+                        border: '1.5px solid var(--c-e6ccb2)',
+                        background: (currentOrdersSlice.length > 0 && currentOrdersSlice.every(o => selectedOrderIds.includes(o.id))) ? 'var(--c-ffd166)' : 'var(--c-fffdfa)',
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         cursor: 'pointer',
                         fontSize: '10px',
-                        color: '#5c4033',
+                        color: 'var(--c-5c4033)',
                         fontWeight: 'bold',
                         margin: '0 auto',
                         boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
@@ -1534,7 +1695,7 @@ export default function App() {
               <tbody>
                 {currentOrdersSlice.length === 0 ? (
                   <tr>
-                    <td colSpan="14" style={{ textAlign: 'center', padding: '35px', color: '#b0a499' }}>
+                    <td colSpan="14" style={{ textAlign: 'center', padding: '35px', color: 'var(--c-b0a499)' }}>
                       No matching orders found.
                     </td>
                   </tr>
@@ -1543,7 +1704,7 @@ export default function App() {
                     const actualDays = calculateActualShippingDays(order.date, order.actualDeliveryDate);
                     const isSelected = selectedOrderIds.includes(order.id);
                     return (
-                      <tr key={order.id} {...ttO(order, 'order-row')} style={{ borderBottom: '1px solid #fcf6f0', background: isSelected ? '#fff5f7' : 'transparent' }}>
+                      <tr key={order.id} {...ttO(order, 'order-row')} style={{ borderBottom: '1px solid var(--c-fcf6f0)', background: isSelected ? 'var(--c-fff5f7)' : 'transparent' }}>
                         <td style={{ padding: '12px 6px' }}>
                           {/* CUSTOM COZY CHECKBOX FOR ROW */}
                           <div 
@@ -1553,14 +1714,14 @@ export default function App() {
                               width: '16px',
                               height: '16px',
                               borderRadius: '4px',
-                              border: '1.5px solid #e6ccb2',
-                              background: isSelected ? '#ffd166' : '#fffdfa',
+                              border: '1.5px solid var(--c-e6ccb2)',
+                              background: isSelected ? 'var(--c-ffd166)' : 'var(--c-fffdfa)',
                               display: 'inline-flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               cursor: 'pointer',
                               fontSize: '10px',
-                              color: '#5c4033',
+                              color: 'var(--c-5c4033)',
                               fontWeight: 'bold',
                               margin: '0 auto',
                               boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
@@ -1569,13 +1730,13 @@ export default function App() {
                             {isSelected ? <Check size={12} strokeWidth={3} /> : ''}
                           </div>
                         </td>
-                        <td style={{ padding: '12px 8px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{order.name}{order.isTutorialSample && <SampleBadge />}</td>
+                        <td style={{ padding: '12px 8px', fontWeight: 'normal', color: 'var(--c-5c4033)', wordBreak: 'break-word' }}><Highlight text={order.name} query={query} />{order.isTutorialSample && <SampleBadge />}</td>
                         <td>{order.qty}</td>
                         <td>₱{Number(order.cost).toFixed(2)}</td>
-                        <td {...ttO(order, 'order-total')} style={{ color: '#bc6c25', fontWeight: 'bold' }}>₱{(order.qty * order.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td {...ttO(order, 'order-total')} style={{ color: 'var(--c-bc6c25)', fontWeight: 'bold' }}>₱{(order.qty * order.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         <td>{order.date}</td>
                         <td>
-                          <span style={{ background: '#ffd166', color: '#5c4033', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
+                          <span style={{ background: 'var(--c-ffd166)', color: 'var(--c-5c4033)', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
                             {order.batch || 'Unassigned'}
                           </span>
                         </td>
@@ -1590,20 +1751,20 @@ export default function App() {
                         </td>
                         <td>
                           {order.orderStatus ? (
-                            <span style={{ background: isOkStatus(order.orderStatus) ? '#d8f3dc' : '#ffccd5', color: isOkStatus(order.orderStatus) ? '#1b4332' : '#780000', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
+                            <span style={{ background: isOkStatus(order.orderStatus) ? 'var(--c-d8f3dc)' : 'var(--c-ffccd5)', color: isOkStatus(order.orderStatus) ? 'var(--c-1b4332)' : 'var(--c-780000)', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
                               {statusLabel(order.orderStatus)}
                             </span>
                           ) : (
-                            <span style={{ color: '#b0a499', fontSize: '11px' }}>-</span>
+                            <span style={{ color: 'var(--c-b0a499)', fontSize: '11px' }}>-</span>
                           )}
                         </td>
-                        <td style={{ color: '#8c7a6b', wordBreak: 'break-word' }}>{order.notes || '-'}</td>
-                        <td {...ttO(order, 'order-est')} style={{ color: '#8c7a6b' }}>{order.estDelivery}</td>
-                        <td style={{ color: order.actualDeliveryDate ? '#5c4033' : '#b0a499' }}>
+                        <td style={{ color: 'var(--c-8c7a6b)', wordBreak: 'break-word' }}>{order.notes ? <Highlight text={order.notes} query={query} /> : '-'}</td>
+                        <td {...ttO(order, 'order-est')} style={{ color: 'var(--c-8c7a6b)' }}>{order.estDelivery}</td>
+                        <td style={{ color: order.actualDeliveryDate ? 'var(--c-5c4033)' : 'var(--c-b0a499)' }}>
                           {order.actualDeliveryDate || '-'}
                         </td>
                         <td>
-                          <span style={{ background: actualDays !== null ? '#d8f3dc' : '#fcf6f0', color: actualDays !== null ? '#1b4332' : '#b0a499', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
+                          <span style={{ background: actualDays !== null ? 'var(--c-d8f3dc)' : 'var(--c-fcf6f0)', color: actualDays !== null ? 'var(--c-1b4332)' : 'var(--c-b0a499)', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
                             {actualDays !== null ? `${actualDays} days` : '-'}
                           </span>
                         </td>
@@ -1649,31 +1810,47 @@ export default function App() {
 
       {/* --- TAB 3: ARCHIVE --- */}
       {activeTab === 'archive' && (
-        <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
-            <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
-              <Archive size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />Archived Orders {query && `(Filtered by "${searchQuery}")`}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', boxSizing: 'border-box' }}>
+          <div style={{ background: 'var(--c-fffdfa)', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', border: '1px solid var(--c-f0e6df)', boxSizing: 'border-box', width: '100%' }}>
+            <div style={{ background: 'var(--c-fcf6f0)', borderRadius: '12px', padding: '15px', border: '1px solid var(--c-e6ccb2)', width: '100%', boxSizing: 'border-box' }}>
+              <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: 'var(--c-7f5539)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
+                <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Archive At A Glance ({archiveBatch})
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '15px', textAlign: 'center' }}>
+                {statCard('TOTAL ORDERS', archiveTotalOrders, 'var(--c-5c4033)')}
+                {statCard('TOTAL QUANTITY (PCS)', archiveTotalQty, 'var(--c-5c4033)')}
+                {statCard('TOTAL SPENT', money(archiveTotalSpent), 'var(--c-bc6c25)')}
+                {statCard('AVG SHIPPING DAYS', archiveAvgDays !== '-' ? `${archiveAvgDays} days` : '-', 'var(--c-7f5539)', 'all archived orders')}
+              </div>
+            </div>
+          </div>
+
+        <div style={{ background: 'var(--c-fffdfa)', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid var(--c-f0e6df)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--c-fcf6f0)', paddingBottom: '10px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
+              <Archive size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />Archived Orders — {query ? 'All Batches' : archiveBatch} {query && `(Filtered by "${searchQuery}")`}
             </h2>
-            <span style={{ fontSize: '11px', color: '#8c7a6b', fontWeight: '600' }}>
+            <span style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', fontWeight: '600' }}>
               {finalFilteredArchive.length} archived · not counted in the General Orders dashboard
             </span>
           </div>
 
-          <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1250px' }}>
+          <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1400px' }}>
             <colgroup>
-              <col style={{ width: '16%' }} />
-              <col style={{ width: '6%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '5%' }} />
+              <col style={{ width: '7%' }} />
               <col style={{ width: '8%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '9%' }} />
               <col style={{ width: '8%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '16%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '14%' }} />
             </colgroup>
             <thead>
-              <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
+              <tr style={{ background: 'var(--c-fcf6f0)', color: 'var(--c-7f5539)' }}>
                 <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>Item Name</th>
                 <th style={{ fontWeight: 'bold' }}>Quantity</th>
                 <th style={{ fontWeight: 'bold' }}>Cost</th>
@@ -1681,6 +1858,7 @@ export default function App() {
                 <th style={{ fontWeight: 'bold' }}>Date Ordered</th>
                 <th style={{ fontWeight: 'bold' }}>Batch</th>
                 <th style={{ fontWeight: 'bold' }}>Order Status</th>
+                <th style={{ fontWeight: 'bold' }}>Notes/Comments</th>
                 <th style={{ fontWeight: 'bold' }}>Actual Delivery</th>
                 <th style={{ fontWeight: 'bold' }}>Shipping Days</th>
                 <th style={{ borderRadius: '0 8px 8px 0', fontWeight: 'bold' }}>Actions</th>
@@ -1689,7 +1867,7 @@ export default function App() {
             <tbody>
               {currentArchiveSlice.length === 0 ? (
                 <tr>
-                  <td colSpan="10" style={{ textAlign: 'center', padding: '35px', color: '#b0a499' }}>
+                  <td colSpan="11" style={{ textAlign: 'center', padding: '35px', color: 'var(--c-b0a499)' }}>
                     {archivedOrders.length === 0 ? 'Nothing archived yet. Delivered orders can be archived from General Orders.' : 'No matching archived orders found.'}
                   </td>
                 </tr>
@@ -1697,29 +1875,30 @@ export default function App() {
                 currentArchiveSlice.map((order) => {
                   const actualDays = calculateActualShippingDays(order.date, order.actualDeliveryDate);
                   return (
-                    <tr key={order.id} style={{ borderBottom: '1px solid #fcf6f0' }}>
-                      <td style={{ padding: '12px 8px', color: '#5c4033', wordBreak: 'break-word' }}>{order.name}{order.isTutorialSample && <SampleBadge />}</td>
+                    <tr key={order.id} style={{ borderBottom: '1px solid var(--c-fcf6f0)' }}>
+                      <td style={{ padding: '12px 8px', color: 'var(--c-5c4033)', wordBreak: 'break-word' }}><Highlight text={order.name} query={query} />{order.isTutorialSample && <SampleBadge />}</td>
                       <td>{order.qty}</td>
                       <td>₱{Number(order.cost).toFixed(2)}</td>
-                      <td style={{ color: '#bc6c25', fontWeight: 'bold' }}>₱{(order.qty * order.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td style={{ color: 'var(--c-bc6c25)', fontWeight: 'bold' }}>₱{(order.qty * order.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td>{order.date}</td>
                       <td>
-                        <span style={{ background: '#ffd166', color: '#5c4033', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
+                        <span style={{ background: 'var(--c-ffd166)', color: 'var(--c-5c4033)', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold', boxShadow: '0 2px 0 rgba(0,0,0,0.05)' }}>
                           {order.batch || 'Unassigned'}
                         </span>
                       </td>
                       <td>
                         {order.orderStatus ? (
-                          <span style={{ background: isOkStatus(order.orderStatus) ? '#d8f3dc' : '#ffccd5', color: isOkStatus(order.orderStatus) ? '#1b4332' : '#780000', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold' }}>
+                          <span style={{ background: isOkStatus(order.orderStatus) ? 'var(--c-d8f3dc)' : 'var(--c-ffccd5)', color: isOkStatus(order.orderStatus) ? 'var(--c-1b4332)' : 'var(--c-780000)', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px', fontWeight: 'bold' }}>
                             {statusLabel(order.orderStatus)}
                           </span>
                         ) : (
-                          <span style={{ color: '#b0a499', fontSize: '11px' }}>-</span>
+                          <span style={{ color: 'var(--c-b0a499)', fontSize: '11px' }}>-</span>
                         )}
                       </td>
-                      <td style={{ color: order.actualDeliveryDate ? '#5c4033' : '#b0a499' }}>{order.actualDeliveryDate || '-'}</td>
+                      <td style={{ color: 'var(--c-8c7a6b)', wordBreak: 'break-word' }}>{order.notes ? <Highlight text={order.notes} query={query} /> : '-'}</td>
+                      <td style={{ color: order.actualDeliveryDate ? 'var(--c-5c4033)' : 'var(--c-b0a499)' }}>{order.actualDeliveryDate || '-'}</td>
                       <td>
-                        <span style={{ background: actualDays !== null ? '#d8f3dc' : '#fcf6f0', color: actualDays !== null ? '#1b4332' : '#b0a499', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px' }}>
+                        <span style={{ background: actualDays !== null ? 'var(--c-d8f3dc)' : 'var(--c-fcf6f0)', color: actualDays !== null ? 'var(--c-1b4332)' : 'var(--c-b0a499)', padding: '4px 10px', borderRadius: '9999px', fontSize: '11px' }}>
                           {actualDays !== null ? `${actualDays} days` : '-'}
                         </span>
                       </td>
@@ -1742,47 +1921,48 @@ export default function App() {
 
           {renderPagination(archivePage, totalArchivePages, setArchivePage, archivePerPage, setArchivePerPage)}
         </div>
+        </div>
       )}
 
       {/* --- TAB 2: WISHLIST --- */}
       {activeTab === 'wishlist' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', boxSizing: 'border-box' }}>
           
-          <div style={{ background: '#fffdfa', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', border: '1px solid #f0e6df', boxSizing: 'border-box', width: '100%' }}>
-            <div style={{ background: '#fcf6f0', borderRadius: '12px', padding: '15px', border: '1px solid #e6ccb2', width: '100%', boxSizing: 'border-box' }}>
-              <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: '#7f5539', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
+          <div style={{ background: 'var(--c-fffdfa)', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', border: '1px solid var(--c-f0e6df)', boxSizing: 'border-box', width: '100%' }}>
+            <div style={{ background: 'var(--c-fcf6f0)', borderRadius: '12px', padding: '15px', border: '1px solid var(--c-e6ccb2)', width: '100%', boxSizing: 'border-box' }}>
+              <h3 style={{ fontSize: '12px', margin: '0 0 10px 0', textAlign: 'center', color: 'var(--c-7f5539)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
                 <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Wishlist Dashboard
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '15px', textAlign: 'center' }}>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>INITIAL TOTAL</span>
-                  <strong style={{ fontSize: '14px', color: '#5c4033' }}>₱{wishlistInitialTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                <div style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+                  <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700' }}>INITIAL TOTAL</span>
+                  <strong style={{ fontSize: '14px', color: 'var(--c-5c4033)' }}>₱{wishlistInitialTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                 </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>LATEST TOTAL</span>
-                  <strong style={{ fontSize: '14px', color: '#bc6c25' }}>₱{wishlistLatestTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                <div style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+                  <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700' }}>LATEST TOTAL</span>
+                  <strong style={{ fontSize: '14px', color: 'var(--c-bc6c25)' }}>₱{wishlistLatestTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                 </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700', marginBottom: '4px' }}>PRICE FLAG</span>
+                <div style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+                  <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700', marginBottom: '4px' }}>PRICE FLAG</span>
                   {renderPriceFlag(1, wishlistInitialTotal, wishlistLatestTotal)}
                 </div>
-                <div style={{ background: '#fffdfa', padding: '10px', borderRadius: '10px', border: '1px solid #e6ccb2' }}>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700' }}>ITEMS SAVED</span>
-                  <strong style={{ fontSize: '14px', color: '#7f5539' }}>{wishlist.length}</strong>
+                <div style={{ background: 'var(--c-fffdfa)', padding: '10px', borderRadius: '10px', border: '1px solid var(--c-e6ccb2)' }}>
+                  <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700' }}>ITEMS SAVED</span>
+                  <strong style={{ fontSize: '14px', color: 'var(--c-7f5539)' }}>{wishlist.length}</strong>
                 </div>
               </div>
             </div>
           </div>
 
-          <div style={{ background: '#fffdfa', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(230, 204, 178, 0.25)', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid #f0e6df' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px', marginBottom: '15px' }}>
-              <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
+          <div style={{ background: 'var(--c-fffdfa)', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(var(--shadow-rgb), 0.25)', width: '100%', boxSizing: 'border-box', overflowX: 'auto', border: '1px solid var(--c-f0e6df)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--c-fcf6f0)', paddingBottom: '10px', marginBottom: '15px' }}>
+              <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
                 <Heart size={17} style={{ verticalAlign: '-3px', marginRight: '8px' }} />Wishlist Tracker & Price Monitor {query && `(Filtered by "${searchQuery}")`}
               </h2>
             
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <div>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px' }}>MOVE TO BATCH</span>
+                  <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px' }}>MOVE TO BATCH</span>
                   <BatchPicker
                     value={wishlistMoveBatch}
                     onChange={setWishlistMoveBatch}
@@ -1815,7 +1995,7 @@ export default function App() {
                 <col style={{ width: '16%' }} />
               </colgroup>
               <thead>
-                <tr style={{ background: '#fcf6f0', color: '#7f5539' }}>
+                <tr style={{ background: 'var(--c-fcf6f0)', color: 'var(--c-7f5539)' }}>
                   <th style={{ padding: '10px', borderRadius: '8px 0 0 8px', fontWeight: 'bold' }}>
                     <div
                       onClick={() => {
@@ -1832,14 +2012,14 @@ export default function App() {
                         width: '16px',
                         height: '16px',
                         borderRadius: '4px',
-                        border: '1.5px solid #e6ccb2',
-                        background: (currentWishlistSlice.length > 0 && currentWishlistSlice.every(w => selectedWishlistIds.includes(w.id))) ? '#ffd166' : '#fffdfa',
+                        border: '1.5px solid var(--c-e6ccb2)',
+                        background: (currentWishlistSlice.length > 0 && currentWishlistSlice.every(w => selectedWishlistIds.includes(w.id))) ? 'var(--c-ffd166)' : 'var(--c-fffdfa)',
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         cursor: 'pointer',
                         fontSize: '10px',
-                        color: '#5c4033',
+                        color: 'var(--c-5c4033)',
                         fontWeight: 'bold',
                         margin: '0 auto',
                         boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
@@ -1861,13 +2041,13 @@ export default function App() {
               <tbody>
                 {currentWishlistSlice.length === 0 ? (
                   <tr>
-                    <td colSpan="8" style={{ textAlign: 'center', padding: '30px', color: '#b0a499' }}>
+                    <td colSpan="8" style={{ textAlign: 'center', padding: '30px', color: 'var(--c-b0a499)' }}>
                       No matching wishlist items found.
                     </td>
                   </tr>
                 ) : (
                   currentWishlistSlice.map((item) => (
-                    <tr key={item.id} {...ttW(item, 'wl-row')} style={{ borderBottom: '1px solid #fcf6f0', background: selectedWishlistIds.includes(item.id) ? '#fff5f7' : 'transparent' }}>
+                    <tr key={item.id} {...ttW(item, 'wl-row')} style={{ borderBottom: '1px solid var(--c-fcf6f0)', background: selectedWishlistIds.includes(item.id) ? 'var(--c-fff5f7)' : 'transparent' }}>
                       <td style={{ padding: '12px 6px' }}>
                         <div
                           onClick={() => handleToggleSelectWishlist(item.id)}
@@ -1875,14 +2055,14 @@ export default function App() {
                             width: '16px',
                             height: '16px',
                             borderRadius: '4px',
-                            border: '1.5px solid #e6ccb2',
-                            background: selectedWishlistIds.includes(item.id) ? '#ffd166' : '#fffdfa',
+                            border: '1.5px solid var(--c-e6ccb2)',
+                            background: selectedWishlistIds.includes(item.id) ? 'var(--c-ffd166)' : 'var(--c-fffdfa)',
                             display: 'inline-flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             cursor: 'pointer',
                             fontSize: '10px',
-                            color: '#5c4033',
+                            color: 'var(--c-5c4033)',
                             fontWeight: 'bold',
                             margin: '0 auto',
                             boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
@@ -1891,11 +2071,11 @@ export default function App() {
                           {selectedWishlistIds.includes(item.id) ? <Check size={12} strokeWidth={3} /> : ''}
                         </div>
                       </td>
-                      <td style={{ padding: '12px 10px', fontWeight: 'normal', color: '#5c4033', wordBreak: 'break-word' }}>{item.name}{item.isTutorialSample && <SampleBadge />}</td>
+                      <td style={{ padding: '12px 10px', fontWeight: 'normal', color: 'var(--c-5c4033)', wordBreak: 'break-word' }}><Highlight text={item.name} query={query} />{item.isTutorialSample && <SampleBadge />}</td>
                       <td>{item.qty}</td>
                       <td>₱{Number(item.initialCost).toFixed(2)}</td>
-                      <td style={{ color: '#5c4033', fontWeight: '500' }}>₱{(item.qty * item.initialCost).toFixed(2)}</td>
-                      <td style={{ color: '#bc6c25', fontWeight: 'bold' }}>₱{Number(item.latestCost).toFixed(2)}</td>
+                      <td style={{ color: 'var(--c-5c4033)', fontWeight: '500' }}>₱{(item.qty * item.initialCost).toFixed(2)}</td>
+                      <td style={{ color: 'var(--c-bc6c25)', fontWeight: 'bold' }}>₱{Number(item.latestCost).toFixed(2)}</td>
                       <td {...ttW(item, 'wl-flag')}>{renderPriceFlag(item.qty, item.initialCost, item.latestCost)}</td>
                       <td>
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
@@ -1937,22 +2117,22 @@ export default function App() {
       {/* --- SHIPPING GUIDE MODAL --- */}
       {isGuideOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.4)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fffdfa', borderRadius: '20px', padding: '25px', maxWidth: '650px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 15px 40px rgba(230, 204, 178, 0.5)', borderTop: '6px solid #ffd166', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
+          <div style={{ background: 'var(--c-fffdfa)', borderRadius: '20px', padding: '25px', maxWidth: '650px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 15px 40px rgba(var(--shadow-rgb), 0.5)', borderTop: '6px solid var(--c-ffd166)', boxSizing: 'border-box', border: '1px solid var(--c-e6ccb2)' }}>
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid var(--c-fcf6f0)', paddingBottom: '12px' }}>
               <div style={{ width: '32px' }}></div>
-              <h2 style={{ fontSize: '18px', margin: 0, color: '#7f5539', fontWeight: '700', textAlign: 'center', flex: 1 }}>
+              <h2 style={{ fontSize: '18px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700', textAlign: 'center', flex: 1 }}>
                 Pinduoduo Shipping Adventure Guide
               </h2>
               <button 
                 onClick={() => setIsGuideOpen(false)} 
-                style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '32px', height: '32px', fontSize: '14px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '32px', height: '32px', fontSize: '14px', cursor: 'pointer', color: 'var(--c-7f5539)', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <X size={14} style={{ display: 'block', margin: '0 auto' }} />
               </button>
             </div>
 
-            <p style={{ fontSize: '12px', color: '#8c7a6b', marginBottom: '20px', textAlign: 'center', lineHeight: '1.5' }}>
+            <p style={{ fontSize: '12px', color: 'var(--c-8c7a6b)', marginBottom: '20px', textAlign: 'center', lineHeight: '1.5' }}>
               Follow your order's step-by-step process from the China warehouse all the way to your doorstep!
             </p>
 
@@ -1975,10 +2155,10 @@ export default function App() {
                     key={idx}
                     onClick={() => setGuideActiveStep(step.statusKey)}
                     style={{
-                      background: isHighlighted ? '#fff5f7' : '#fcf6f0',
+                      background: isHighlighted ? 'var(--c-fff5f7)' : 'var(--c-fcf6f0)',
                       padding: '12px 18px',
                       borderRadius: '12px',
-                      border: isHighlighted ? '2px solid #ffafcc' : '1px solid #e6ccb2',
+                      border: isHighlighted ? '2px solid var(--c-ffafcc)' : '1px solid var(--c-e6ccb2)',
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',
                       boxShadow: isHighlighted ? '0 4px 15px rgba(255, 175, 204, 0.4)' : 'none',
@@ -1990,10 +2170,10 @@ export default function App() {
                     }}
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'left', flex: 1 }}>
-                      <strong style={{ fontSize: '13px', color: '#5c4033' }}>
+                      <strong style={{ fontSize: '13px', color: 'var(--c-5c4033)' }}>
                         {step.isStep ? `Step ${idx}: ${step.title}` : step.title}
                       </strong>
-                      <p style={{ fontSize: '11px', color: '#7f5539', margin: 0, lineHeight: '1.4' }}>
+                      <p style={{ fontSize: '11px', color: 'var(--c-7f5539)', margin: 0, lineHeight: '1.4' }}>
                         {step.desc}
                       </p>
                     </div>
@@ -2023,15 +2203,15 @@ export default function App() {
       {/* --- ADD / EDIT ORDER MODAL --- */}
       {isOrderModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '480px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
+          <div style={{ background: 'var(--c-fffdfa)', borderRadius: '16px', padding: '25px', maxWidth: '480px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.4)', borderTop: '5px solid var(--c-ffafcc)', boxSizing: 'border-box', border: '1px solid var(--c-e6ccb2)' }}>
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px' }}>
-              <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid var(--c-fcf6f0)', paddingBottom: '10px' }}>
+              <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
                 {editingOrder ? 'Edit Order' : 'Add New Order'}
               </h2>
               <button 
                 onClick={() => setIsOrderModalOpen(false)} 
-                style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: 'var(--c-7f5539)', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <X size={14} style={{ display: 'block', margin: '0 auto' }} />
               </button>
@@ -2039,29 +2219,29 @@ export default function App() {
 
             <form onSubmit={handleSaveOrder} style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
               <div data-tour="order-name">
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Item Name*</label>
-                <input type="text" name="name" value={orderFormData.name} onChange={handleOrderInputChange} placeholder="e.g. Minimalist Rug" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} required />
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Item Name*</label>
+                <input type="text" name="name" value={orderFormData.name} onChange={handleOrderInputChange} placeholder="e.g. Minimalist Rug" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} required />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div data-tour="order-qty">
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Quantity</label>
-                  <input type="number" name="qty" min="1" value={orderFormData.qty} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Quantity</label>
+                  <input type="number" name="qty" min="1" value={orderFormData.qty} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} />
                 </div>
                 <div data-tour="order-cost">
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Cost (Unit) (₱)*</label>
-                  <input type="number" name="cost" value={orderFormData.cost} onChange={handleOrderInputChange} placeholder="250" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} required />
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Cost (Unit) (₱)*</label>
+                  <input type="number" name="cost" value={orderFormData.cost} onChange={handleOrderInputChange} placeholder="250" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} required />
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '0.8fr 1.4fr', gap: '10px', alignItems: 'start' }}>
                 <div data-tour="order-date">
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Date Ordered</label>
-                  <input type="date" name="date" value={orderFormData.date} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Date Ordered</label>
+                  <input type="date" name="date" value={orderFormData.date} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} />
                 </div>
 
                 <div data-tour="order-batch">
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Batch</label>
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Batch</label>
                   <BatchPicker
                     value={orderFormData.batch}
                     onChange={(b) => setOrderFormData(prev => ({ ...prev, batch: b }))}
@@ -2073,21 +2253,21 @@ export default function App() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div data-tour="order-shipping" style={{ position: 'relative' }}>
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Shipping Status</label>
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Shipping Status</label>
                   <div 
                     onClick={() => setModalShippingOpen(!modalShippingOpen)}
-                    style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                   >
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{orderFormData.shippingStatus || 'Ordered'}</span>
-                    <span style={{ fontSize: '10px', color: '#8c7a6b', marginLeft: '4px' }}>{modalShippingOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+                    <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', marginLeft: '4px' }}>{modalShippingOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
                   </div>
                   {modalShippingOpen && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '160px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '160px', overflowY: 'auto', background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderRadius: '8px', boxShadow: '0 6px 20px rgba(var(--shadow-rgb), 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
                       {shippingStatusOptions.map(st => (
                         <div 
                           key={st}
                           onClick={() => { setOrderFormData(prev => ({ ...prev, shippingStatus: st })); setModalShippingOpen(false); }}
-                          style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: orderFormData.shippingStatus === st ? '#ffd166' : 'transparent', fontWeight: orderFormData.shippingStatus === st ? 'bold' : 'normal', color: '#5c4033' }}
+                          style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: orderFormData.shippingStatus === st ? 'var(--c-ffd166)' : 'transparent', fontWeight: orderFormData.shippingStatus === st ? 'bold' : 'normal', color: 'var(--c-5c4033)' }}
                         >
                           {st}
                         </div>
@@ -2097,21 +2277,21 @@ export default function App() {
                 </div>
 
                 <div data-tour="order-status" style={{ position: 'relative' }}>
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Order Status</label>
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Order Status</label>
                   <div 
                     onClick={() => setModalOrderStatusOpen(!modalOrderStatusOpen)}
-                    style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                   >
                     <span>{orderFormData.orderStatus ? statusLabel(orderFormData.orderStatus) : '-- Select Status --'}</span>
-                    <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{modalOrderStatusOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+                    <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)' }}>{modalOrderStatusOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
                   </div>
                   {modalOrderStatusOpen && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '140px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '140px', overflowY: 'auto', background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderRadius: '8px', boxShadow: '0 6px 20px rgba(var(--shadow-rgb), 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
                       {orderStatusOptions.map(ost => (
                         <div 
                           key={ost}
                           onClick={() => { setOrderFormData(prev => ({ ...prev, orderStatus: ost === '-- None --' ? '' : ost })); setModalOrderStatusOpen(false); }}
-                          style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: orderFormData.orderStatus === ost ? '#ffd166' : 'transparent', fontWeight: orderFormData.orderStatus === ost ? 'bold' : 'normal', color: '#5c4033' }}
+                          style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: orderFormData.orderStatus === ost ? 'var(--c-ffd166)' : 'transparent', fontWeight: orderFormData.orderStatus === ost ? 'bold' : 'normal', color: 'var(--c-5c4033)' }}
                         >
                           {statusLabel(ost)}
                         </div>
@@ -2123,12 +2303,12 @@ export default function App() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div data-tour="order-actual">
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Actual Delivery Date</label>
-                  <input type="date" name="actualDeliveryDate" value={orderFormData.actualDeliveryDate} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Actual Delivery Date</label>
+                  <input type="date" name="actualDeliveryDate" value={orderFormData.actualDeliveryDate} onChange={handleOrderInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} />
                 </div>
                 <div data-tour="order-notes">
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Notes/Comments</label>
-                  <input type="text" name="notes" value={orderFormData.notes} onChange={handleOrderInputChange} placeholder="Optional notes..." style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Notes/Comments</label>
+                  <input type="text" name="notes" value={orderFormData.notes} onChange={handleOrderInputChange} placeholder="Optional notes..." style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} />
                 </div>
               </div>
 
@@ -2146,28 +2326,28 @@ export default function App() {
       {/* --- BATCH EDIT MODAL FOR SELECTED ORDERS --- */}
       {isBatchEditOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
-          <div data-tour="batch-modal" style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '460px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
+          <div data-tour="batch-modal" style={{ background: 'var(--c-fffdfa)', borderRadius: '16px', padding: '25px', maxWidth: '460px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.4)', borderTop: '5px solid var(--c-ffafcc)', boxSizing: 'border-box', border: '1px solid var(--c-e6ccb2)' }}>
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px' }}>
-              <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid var(--c-fcf6f0)', paddingBottom: '10px' }}>
+              <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
                 <Pencil size={16} style={{ verticalAlign: '-2px', marginRight: '8px' }} />Batch Edit Selected Orders ({selectedOrderIds.length})
               </h2>
               <button 
                 onClick={() => setIsBatchEditOpen(false)} 
-                style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: 'var(--c-7f5539)', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <X size={14} style={{ display: 'block', margin: '0 auto' }} />
               </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
-              <p style={{ color: '#8c7a6b', margin: 0, lineHeight: '1.4' }}>
+              <p style={{ color: 'var(--c-8c7a6b)', margin: 0, lineHeight: '1.4' }}>
                 Fields that are already filled in stay as they are. Only change what you want to update for all {selectedOrderIds.length} selected items!
               </p>
 
               {/* Target Batch Selection */}
               <div>
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '4px', color: '#7f5539' }}>Batch</label>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '4px', color: 'var(--c-7f5539)' }}>Batch</label>
                 <BatchPicker
                   value={batchEditTargetBatch}
                   onChange={setBatchEditTargetBatch}
@@ -2179,21 +2359,21 @@ export default function App() {
 
               {/* Target Shipping Status Selection */}
               <div style={{ position: 'relative' }}>
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Shipping Status</label>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Shipping Status</label>
                 <div 
                   onClick={() => setBatchEditShippingDropdownOpen(!batchEditShippingDropdownOpen)}
-                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
                   <span>{batchEditTargetShipping === KEEP ? '-- Keep current --' : batchEditTargetShipping}</span>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditShippingDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+                  <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)' }}>{batchEditShippingDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
                 </div>
                 {batchEditShippingDropdownOpen && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '160px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '160px', overflowY: 'auto', background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderRadius: '8px', boxShadow: '0 6px 20px rgba(var(--shadow-rgb), 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
                     {[KEEP, ...shippingStatusOptions].map(st => (
                       <div 
                         key={st}
                         onClick={() => { setBatchEditTargetShipping(st); setBatchEditShippingDropdownOpen(false); }}
-                        style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetShipping === st ? '#ffd166' : 'transparent', fontWeight: batchEditTargetShipping === st ? 'bold' : 'normal', color: '#5c4033' }}
+                        style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetShipping === st ? 'var(--c-ffd166)' : 'transparent', fontWeight: batchEditTargetShipping === st ? 'bold' : 'normal', color: 'var(--c-5c4033)' }}
                       >
                         {st === KEEP ? '-- Keep current --' : st}
                       </div>
@@ -2204,21 +2384,21 @@ export default function App() {
 
               {/* Target Order Status Selection */}
               <div style={{ position: 'relative' }}>
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Order Status</label>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Order Status</label>
                 <div 
                   onClick={() => setBatchEditOrderStatusDropdownOpen(!batchEditOrderStatusDropdownOpen)}
-                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
                   <span>{batchEditTargetOrderStatus === KEEP ? '-- Keep current --' : (batchEditTargetOrderStatus ? statusLabel(batchEditTargetOrderStatus) : '-- None --')}</span>
-                  <span style={{ fontSize: '10px', color: '#8c7a6b' }}>{batchEditOrderStatusDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+                  <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)' }}>{batchEditOrderStatusDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
                 </div>
                 {batchEditOrderStatusDropdownOpen && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '140px', overflowY: 'auto', background: '#fffdfa', border: '1px solid #e6ccb2', borderRadius: '8px', boxShadow: '0 6px 20px rgba(230, 204, 178, 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '140px', overflowY: 'auto', background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderRadius: '8px', boxShadow: '0 6px 20px rgba(var(--shadow-rgb), 0.4)', zIndex: 300, padding: '4px', boxSizing: 'border-box' }}>
                     {[KEEP, ...orderStatusOptions].map(ost => (
                       <div 
                         key={ost}
                         onClick={() => { setBatchEditTargetOrderStatus(ost === '-- None --' ? '' : ost); setBatchEditOrderStatusDropdownOpen(false); }}
-                        style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetOrderStatus === ost ? '#ffd166' : 'transparent', fontWeight: batchEditTargetOrderStatus === ost ? 'bold' : 'normal', color: '#5c4033' }}
+                        style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: batchEditTargetOrderStatus === ost ? 'var(--c-ffd166)' : 'transparent', fontWeight: batchEditTargetOrderStatus === ost ? 'bold' : 'normal', color: 'var(--c-5c4033)' }}
                       >
                         {ost === KEEP ? '-- Keep current --' : statusLabel(ost)}
                       </div>
@@ -2229,12 +2409,12 @@ export default function App() {
 
               {/* Target Actual Delivery Date */}
               <div>
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Actual Delivery Date (leave empty to keep current)</label>
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Actual Delivery Date (leave empty to keep current)</label>
                 <input 
                   type="date" 
                   value={batchEditTargetActualDelivery} 
                   onChange={(e) => setBatchEditTargetActualDelivery(e.target.value)} 
-                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} 
+                  style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} 
                 />
               </div>
 
@@ -2253,14 +2433,14 @@ export default function App() {
 
       {/* --- UNDO TOAST (after moving wishlist items to orders) --- */}
       {lastMove && (
-        <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 1500, background: '#fffdfa', border: '1px solid #e6ccb2', borderTop: '4px solid #bde0fe', borderRadius: '16px', padding: '12px 16px', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.6)', display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '92vw', boxSizing: 'border-box', fontSize: '12px', color: '#5c4033', flexWrap: 'wrap', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 1500, background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderTop: '4px solid var(--c-bde0fe)', borderRadius: '16px', padding: '12px 16px', boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.6)', display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '92vw', boxSizing: 'border-box', fontSize: '12px', color: 'var(--c-5c4033)', flexWrap: 'wrap', justifyContent: 'center' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <ArrowRight size={14} /> Moved {lastMove.items.length} {lastMove.items.length === 1 ? 'item' : 'items'} to <strong>{lastMove.batch}</strong> in General Orders.
           </span>
           <button onClick={handleUndoMove} style={getButtonStyle('blue')}><Undo2 size={13} /> Undo</button>
           <button
             onClick={() => setLastMove(null)}
-            style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '26px', height: '26px', fontSize: '11px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '26px', height: '26px', fontSize: '11px', cursor: 'pointer', color: 'var(--c-7f5539)', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title="Dismiss"
           >
             <X size={14} style={{ display: 'block', margin: '0 auto' }} />
@@ -2270,12 +2450,12 @@ export default function App() {
 
       {/* --- UNDO TOAST (after archiving delivered orders) --- */}
       {lastArchive && (
-        <div style={{ position: 'fixed', bottom: lastMove ? '88px' : '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 1500, background: '#fffdfa', border: '1px solid #e6ccb2', borderTop: '4px solid #bde0fe', borderRadius: '16px', padding: '12px 16px', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.6)', display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '92vw', boxSizing: 'border-box', fontSize: '12px', color: '#5c4033', flexWrap: 'wrap', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', bottom: lastMove ? '88px' : '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 1500, background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderTop: '4px solid var(--c-bde0fe)', borderRadius: '16px', padding: '12px 16px', boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.6)', display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '92vw', boxSizing: 'border-box', fontSize: '12px', color: 'var(--c-5c4033)', flexWrap: 'wrap', justifyContent: 'center' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Archive size={14} /> Archived {lastArchive.ids.length} {lastArchive.ids.length === 1 ? 'order' : 'orders'}.</span>
           <button onClick={handleUndoArchive} style={getButtonStyle('blue')}><Undo2 size={13} /> Undo</button>
           <button
             onClick={() => setLastArchive(null)}
-            style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '26px', height: '26px', fontSize: '11px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '26px', height: '26px', fontSize: '11px', cursor: 'pointer', color: 'var(--c-7f5539)', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title="Dismiss"
           >
             <X size={14} style={{ display: 'block', margin: '0 auto' }} />
@@ -2286,10 +2466,10 @@ export default function App() {
       {/* --- DELETE CONFIRMATION DIALOG --- */}
       {confirmDialog && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.4)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000, padding: '15px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '380px', width: '100%', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.5)', borderTop: '5px solid #ffccd5', boxSizing: 'border-box', border: '1px solid #e6ccb2', textAlign: 'center' }}>
-            <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'center', color: '#780000' }}><Trash2 size={30} /></div>
-            <h2 style={{ fontSize: '16px', margin: '0 0 8px 0', color: '#7f5539', fontWeight: '700' }}>{confirmDialog.title}</h2>
-            <p style={{ fontSize: '12px', color: '#8c7a6b', margin: '0 0 20px 0', lineHeight: '1.5', wordBreak: 'break-word' }}>{confirmDialog.message}</p>
+          <div style={{ background: 'var(--c-fffdfa)', borderRadius: '16px', padding: '25px', maxWidth: '380px', width: '100%', boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.5)', borderTop: '5px solid var(--c-ffccd5)', boxSizing: 'border-box', border: '1px solid var(--c-e6ccb2)', textAlign: 'center' }}>
+            <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'center', color: 'var(--c-780000)' }}><Trash2 size={30} /></div>
+            <h2 style={{ fontSize: '16px', margin: '0 0 8px 0', color: 'var(--c-7f5539)', fontWeight: '700' }}>{confirmDialog.title}</h2>
+            <p style={{ fontSize: '12px', color: 'var(--c-8c7a6b)', margin: '0 0 20px 0', lineHeight: '1.5', wordBreak: 'break-word' }}>{confirmDialog.message}</p>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button type="button" onClick={() => setConfirmDialog(null)} style={getButtonStyle('light')}>Cancel</button>
               <button
@@ -2311,15 +2491,15 @@ export default function App() {
       {/* --- ADD / EDIT WISHLIST MODAL --- */}
       {isWishlistModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fffdfa', borderRadius: '16px', padding: '25px', maxWidth: '440px', width: '100%', boxShadow: '0 10px 30px rgba(230, 204, 178, 0.4)', borderTop: '5px solid #ffafcc', boxSizing: 'border-box', border: '1px solid #e6ccb2' }}>
+          <div style={{ background: 'var(--c-fffdfa)', borderRadius: '16px', padding: '25px', maxWidth: '440px', width: '100%', boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.4)', borderTop: '5px solid var(--c-ffafcc)', boxSizing: 'border-box', border: '1px solid var(--c-e6ccb2)' }}>
             
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid #fcf6f0', paddingBottom: '10px' }}>
-              <h2 style={{ fontSize: '16px', margin: 0, color: '#7f5539', fontWeight: '700' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '2px solid var(--c-fcf6f0)', paddingBottom: '10px' }}>
+              <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: '700' }}>
                 {editingWishlistItem ? 'Edit Wishlist Item' : 'Add Wishlist Item'}
               </h2>
               <button 
                 onClick={() => setIsWishlistModalOpen(false)} 
-                style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: '#7f5539', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '28px', height: '28px', fontSize: '12px', cursor: 'pointer', color: 'var(--c-7f5539)', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <X size={14} style={{ display: 'block', margin: '0 auto' }} />
               </button>
@@ -2327,33 +2507,33 @@ export default function App() {
 
             <form onSubmit={handleSaveWishlist} style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
               <div data-tour="wl-name">
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Item Name*</label>
-                <input type="text" name="name" value={wishlistFormData.name} onChange={handleWishlistInputChange} placeholder="e.g. Cute Makeup Organizer" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} required />
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Item Name*</label>
+                <input type="text" name="name" value={wishlistFormData.name} onChange={handleWishlistInputChange} placeholder="e.g. Cute Makeup Organizer" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} required />
               </div>
 
               <div data-tour="wl-qty">
-                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Quantity</label>
-                <input type="number" name="qty" min="1" value={wishlistFormData.qty} onChange={handleWishlistInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
+                <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Quantity</label>
+                <input type="number" name="qty" min="1" value={wishlistFormData.qty} onChange={handleWishlistInputChange} style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div data-tour="wl-initial">
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Initial Cost (Unit ₱)*</label>
-                  <input type="number" step="0.01" name="initialCost" value={wishlistFormData.initialCost} onChange={handleWishlistInputChange} placeholder="45.00" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} required />
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Initial Cost (Unit ₱)*</label>
+                  <input type="number" step="0.01" name="initialCost" value={wishlistFormData.initialCost} onChange={handleWishlistInputChange} placeholder="45.00" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} required />
                 </div>
                 <div data-tour="wl-latest">
-                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: '#7f5539' }}>Latest Cost (Unit ₱)</label>
-                  <input type="number" step="0.01" name="latestCost" value={wishlistFormData.latestCost} onChange={handleWishlistInputChange} placeholder="Leave empty if same" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e6ccb2', fontSize: '12px', background: '#fcf6f0', color: '#5c4033', outline: 'none' }} />
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Latest Cost (Unit ₱)</label>
+                  <input type="number" step="0.01" name="latestCost" value={wishlistFormData.latestCost} onChange={handleWishlistInputChange} placeholder="Leave empty if same" style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} />
                 </div>
               </div>
 
               {/* LIVE COMPUTATION PREVIEW BOX (FOR BOTH ADD & EDIT) */}
-              <div style={{ background: '#fcf6f0', border: '1px solid #e6ccb2', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#7f5539' }}>
+              <div style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--c-7f5539)' }}>
                   <span>Initial Total: <strong>₱{(Number(wishlistFormData.qty || 1) * Number(wishlistFormData.initialCost || 0)).toFixed(2)}</strong></span>
                   <span>Latest Total: <strong>₱{(Number(wishlistFormData.qty || 1) * (wishlistFormData.latestCost !== '' ? Number(wishlistFormData.latestCost) : Number(wishlistFormData.initialCost || 0))).toFixed(2)}</strong></span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '2px', borderTop: '1px dashed #e6ccb2' }}>
+                <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '2px', borderTop: '1px dashed var(--c-e6ccb2)' }}>
                   {renderPriceFlag(
                     Number(wishlistFormData.qty || 1), 
                     Number(wishlistFormData.initialCost || 0), 

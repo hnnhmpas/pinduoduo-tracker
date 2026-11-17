@@ -317,8 +317,8 @@ const UI = {
 };
 
 const C = {
-  cream: '#fffdfa', sand: '#fcf6f0', border: '#e6ccb2', brown: '#5c4033',
-  brownSoft: '#7f5539', muted: '#8c7a6b', yellow: '#ffd166', pink: '#ffafcc', pinkSoft: '#ffc8dd',
+  cream: 'var(--c-fffdfa)', sand: 'var(--c-fcf6f0)', border: 'var(--c-e6ccb2)', brown: 'var(--c-5c4033)',
+  brownSoft: 'var(--c-7f5539)', muted: 'var(--c-8c7a6b)', yellow: 'var(--c-ffd166)', pink: 'var(--c-ffafcc)', pinkSoft: 'var(--c-ffc8dd)',
 };
 
 const pillBtn = (variant = 'light', disabled = false) => {
@@ -331,7 +331,7 @@ const pillBtn = (variant = 'light', disabled = false) => {
     background: base.bg, color: base.color, border: base.border,
     padding: '8px 16px', borderRadius: '9999px', fontWeight: 700, fontSize: '12px',
     cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.45 : 1,
-    boxShadow: '0 3px 0 rgba(199, 175, 150, 0.4)', outline: 'none', boxSizing: 'border-box',
+    boxShadow: '0 3px 0 rgba(var(--shadow-btn-rgb), 0.4)', outline: 'none', boxSizing: 'border-box',
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
     fontFamily: 'inherit', letterSpacing: 'normal', lineHeight: 1.2,
   };
@@ -450,7 +450,7 @@ function placeTooltip(rect, W, H, vw, vh) {
 export function TourWelcome({ onPick, onSkip }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 4000, background: 'rgba(60, 40, 30, 0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '15px', boxSizing: 'border-box' }}>
-      <div role="dialog" aria-modal="true" style={{ background: C.cream, borderRadius: '20px', padding: '28px 26px 24px', maxWidth: '420px', width: '100%', boxShadow: '0 15px 40px rgba(230, 204, 178, 0.6)', borderTop: `6px solid ${C.yellow}`, border: `1px solid ${C.border}`, boxSizing: 'border-box', textAlign: 'center', fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif", letterSpacing: 'normal' }}>
+      <div role="dialog" aria-modal="true" style={{ background: C.cream, borderRadius: '20px', padding: '28px 26px 24px', maxWidth: '420px', width: '100%', boxShadow: '0 15px 40px rgba(var(--shadow-rgb), 0.6)', borderTop: `6px solid ${C.yellow}`, border: `1px solid ${C.border}`, boxSizing: 'border-box', textAlign: 'center', fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif", letterSpacing: 'normal' }}>
         <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'center', color: C.brownSoft }}><ShoppingBag size={34} /></div>
         <div style={{ fontSize: '19px', fontWeight: 700, color: C.brownSoft, marginBottom: '6px' }}>
           Welcome! / Maligayang pagdating!

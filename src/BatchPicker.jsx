@@ -47,7 +47,7 @@ export const getNextBatchNumber = (batches) =>
 
 const byNumberDesc = (a, b) => (b.num ?? -1) - (a.num ?? -1) || a.name.localeCompare(b.name);
 
-const C = { cream: '#fffdfa', sand: '#fcf6f0', border: '#e6ccb2', brown: '#5c4033', brownSoft: '#7f5539', muted: '#8c7a6b', yellow: '#ffd166', pink: '#ffafcc' };
+const C = { cream: 'var(--c-fffdfa)', sand: 'var(--c-fcf6f0)', border: 'var(--c-e6ccb2)', brown: 'var(--c-5c4033)', brownSoft: 'var(--c-7f5539)', muted: 'var(--c-8c7a6b)', yellow: 'var(--c-ffd166)', pink: 'var(--c-ffafcc)' };
 const PANEL_W = 280;
 
 export function BatchPicker({
@@ -57,6 +57,7 @@ export function BatchPicker({
   extras = [],        // [{ value, label }] shown first, e.g. All Batches / Keep current / Auto
   allowCreate = true, // false for filters: only existing batches can be chosen
   compact = false,    // chips show just the number (for tight spaces like the Add Order modal)
+  mode = 'orders',    // 'archive' lists every batch in one plain list (archived orders are all finished)
   maxRecent = 3,
 }) {
   const [open, setOpen] = useState(false);
@@ -86,9 +87,9 @@ export function BatchPicker({
   }
 
   const chipStyle = (selected, kind) => ({
-    background: selected ? C.yellow : kind === 'more' ? '#bde0fe' : kind === 'new' ? '#fff5f7' : C.sand,
-    color: kind === 'more' ? '#03045e' : C.brown,
-    border: kind === 'new' ? `1.5px dashed ${C.pink}` : kind === 'more' ? '1px solid #90e0ef' : `1px solid ${C.border}`,
+    background: selected ? C.yellow : kind === 'more' ? 'var(--c-bde0fe)' : kind === 'new' ? 'var(--c-fff5f7)' : C.sand,
+    color: kind === 'more' ? 'var(--c-03045e)' : C.brown,
+    border: kind === 'new' ? `1.5px dashed ${C.pink}` : kind === 'more' ? '1px solid var(--c-90e0ef)' : `1px solid ${C.border}`,
     borderRadius: '9999px',
     padding: compact ? '4px 10px' : '5px 12px',
     fontSize: compact ? '11px' : '12px',
@@ -101,7 +102,7 @@ export function BatchPicker({
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px',
-    boxShadow: selected ? '0 2px 0 rgba(199, 175, 150, 0.4)' : 'none',
+    boxShadow: selected ? '0 2px 0 rgba(var(--shadow-btn-rgb), 0.4)' : 'none',
   });
 
   // ---- panel placement (fixed, so modals / table containers never clip it) ----
@@ -178,7 +179,7 @@ export function BatchPicker({
         onMouseLeave={(e) => { if (!selected) e.currentTarget.style.background = 'transparent'; }}
       >
         <span>
-          <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: isOpen ? '#7bc47f' : '#c9b8a8', marginRight: '8px' }} />
+          <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: isOpen ? 'var(--c-7bc47f)' : 'var(--c-c9b8a8)', marginRight: '8px' }} />
           {b.name}
         </span>
         <span style={{ fontSize: '10px', color: C.muted, fontWeight: 600 }}>
@@ -214,7 +215,7 @@ export function BatchPicker({
           style={{
             position: 'fixed', zIndex: 2500, width: PANEL_W, boxSizing: 'border-box', overflowY: 'auto',
             background: C.cream, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '8px',
-            boxShadow: '0 10px 30px rgba(230, 204, 178, 0.65)', textAlign: 'left',
+            boxShadow: '0 10px 30px rgba(var(--shadow-rgb), 0.65)', textAlign: 'left',
             left: pos.left, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight,
           }}
         >
@@ -247,6 +248,14 @@ export function BatchPicker({
             </div>
           )}
 
+          {mode === 'archive' ? (
+            <>
+              <div style={secLabel}>Batches in the archive</div>
+              {batches.length === 0 && <div style={{ fontSize: '11px', color: C.muted, padding: '2px 9px 4px' }}>Nothing archived yet.</div>}
+              {[...batches].sort(byNumberDesc).map((b) => row(b, false))}
+            </>
+          ) : (
+            <>
           <div style={secLabel}>Open · still has undelivered orders</div>
           {openList.length === 0 && <div style={{ fontSize: '11px', color: C.muted, padding: '2px 9px 4px' }}>No open batches right now.</div>}
           {openList.map((b) => row(b, true))}
@@ -261,6 +270,8 @@ export function BatchPicker({
                 {showFinished ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {showFinished ? 'Hide' : 'Show'} {finishedList.length} finished {finishedList.length === 1 ? 'batch' : 'batches'}…
               </button>
               {showFinished && finishedList.map((b) => row(b, false))}
+            </>
+          )}
             </>
           )}
         </div>
