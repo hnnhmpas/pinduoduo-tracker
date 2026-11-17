@@ -883,12 +883,14 @@ export default function App() {
   const archiveAvgDays = averageDays(archivedForView);
   const money = (n) => `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   // Soft pastel tints (theme-aware, defined in index.css) so the dashboard boxes stay light and easy to read
-  const tintBox = (tint = 'sand') => ({ background: `var(--tint-${tint})`, padding: '10px', borderRadius: '10px', border: `1px solid var(--tint-${tint}-border)` });
+  // Status boxes reuse the exact shipping-badge colors; everything else uses one soft rose. No border lines.
+  const STATUS_BOX_BG = { customs: 'var(--c-c9daf8)', transit: 'var(--c-fdd6a8)', phcustoms: 'var(--c-e6cff2)', hub: 'var(--c-fcf2cd)', delivered: 'var(--c-d4edbc)' };
+  const tintBox = (tint = 'rose') => ({ background: STATUS_BOX_BG[tint] || `var(--tint-${tint})`, padding: '10px', borderRadius: '10px', border: 'none' });
   const statCard = (label, value, color, sub, title, tint) => (
     <div key={label} title={title} style={tintBox(tint)}>
-      <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700' }}>{label}</span>
+      <span style={{ fontSize: '10px', color: 'var(--c-7f5539)', display: 'block', fontWeight: '700' }}>{label}</span>
       <strong style={{ fontSize: '16px', color }}>{value}</strong>
-      {sub != null && <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', marginTop: '2px' }}>{sub}</span>}
+      {sub != null && <span style={{ fontSize: '10px', color: 'var(--c-7f5539)', display: 'block', marginTop: '2px' }}>{sub}</span>}
     </div>
   );
 
@@ -1540,16 +1542,6 @@ export default function App() {
           </div>
 
           <div style={{ display: 'flex', gap: '18px', alignItems: 'flex-end', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {activeTab !== 'archive' && (
-              <button
-                data-tour="add-btn"
-                onClick={activeTab === 'wishlist' ? handleOpenAddWishlist : handleOpenAddOrder}
-                style={getButtonStyle('pink')}
-              >
-                <Plus size={14} strokeWidth={3} /> {activeTab === 'wishlist' ? 'Add Wishlist Item' : 'Add Order'}
-              </button>
-            )}
-
             {(activeTab === 'orders' || activeTab === 'archive') && (
               <div data-tour="batch-filter">
                 <span style={{ fontSize: '10px', color: 'var(--c-8c7a6b)', display: 'block', fontWeight: '700', letterSpacing: '0.5px', marginBottom: '4px', textAlign: 'left' }}>BATCH FILTER</span>
@@ -1600,15 +1592,15 @@ export default function App() {
                 <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />General Order Dashboard ({selectedBatch})
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '15px', textAlign: 'center' }}>
-                {statCard('TOTAL ORDERS', totalOrdersCount, 'var(--c-5c4033)', undefined, undefined, 'butter')}
-                {statCard('TOTAL QUANTITY (PCS)', totalQuantity, 'var(--c-5c4033)', undefined, undefined, 'peach')}
+                {statCard('TOTAL ORDERS', totalOrdersCount, 'var(--c-5c4033)', undefined, undefined, 'rose')}
+                {statCard('TOTAL QUANTITY (PCS)', totalQuantity, 'var(--c-5c4033)', undefined, undefined, 'rose')}
                 {statCard('TOTAL SPENT', money(displayTotalCost), 'var(--c-bc6c25)', undefined, undefined, 'rose')}
-                {statCard('IN CHINA CUSTOMS', chinaCustomsStats.entries, 'var(--c-3a6ea5)', `${chinaCustomsStats.pcs} pcs`, undefined, 'sky')}
-                {statCard('IN TRANSIT TO PH', inTransitStats.entries, 'var(--c-bc6c25)', `${inTransitStats.pcs} pcs`, undefined, 'butter')}
-                {statCard('IN PH CUSTOMS', phCustomsStats.entries, 'var(--c-6a4c93)', `${phCustomsStats.pcs} pcs`, undefined, 'lilac')}
-                {statCard('PH HUB / OUT FOR DELIVERY', phHubStats.entries, 'var(--c-2d6a4f)', `${phHubStats.pcs} pcs`, undefined, 'mint')}
-                {statCard('DELIVERED', deliveredCount, 'var(--c-2d6a4f)', 'all orders, incl. archived', 'Standalone: counts every delivered order (archived too) and ignores the batch filter.', 'mint')}
-                {statCard('AVG SHIPPING DAYS', avgShippingDays !== '-' ? `${avgShippingDays} days` : '-', 'var(--c-7f5539)', 'all orders, incl. archived', 'Standalone: counts every order (archived too) and ignores the batch filter. Only permanently deleting an order removes it from this average.', 'sand')}
+                {statCard('IN CHINA CUSTOMS', chinaCustomsStats.entries, 'var(--c-03045e)', `${chinaCustomsStats.pcs} pcs`, undefined, 'customs')}
+                {statCard('IN TRANSIT TO PH', inTransitStats.entries, 'var(--c-5c4033)', `${inTransitStats.pcs} pcs`, undefined, 'transit')}
+                {statCard('IN PH CUSTOMS', phCustomsStats.entries, 'var(--c-3c096c)', `${phCustomsStats.pcs} pcs`, undefined, 'phcustoms')}
+                {statCard('PH HUB / OUT FOR DELIVERY', phHubStats.entries, 'var(--c-5c4033)', `${phHubStats.pcs} pcs`, undefined, 'hub')}
+                {statCard('DELIVERED', deliveredCount, 'var(--c-1b4332)', 'all orders, incl. archived', 'Standalone: counts every delivered order (archived too) and ignores the batch filter.', 'delivered')}
+                {statCard('AVG SHIPPING DAYS', avgShippingDays !== '-' ? `${avgShippingDays} days` : '-', 'var(--c-7f5539)', 'all orders, incl. archived', 'Standalone: counts every order (archived too) and ignores the batch filter. Only permanently deleting an order removes it from this average.', 'rose')}
               </div>
             </div>
           </div>
@@ -1644,6 +1636,13 @@ export default function App() {
                     <Archive size={14} /> Archive Delivered ({deliveredInView.length})
                   </button>
                 )}
+                <button
+                  data-tour="add-btn"
+                  onClick={handleOpenAddOrder}
+                  style={getButtonStyle('pink')}
+                >
+                  <Plus size={14} strokeWidth={3} /> Add Order
+                </button>
               </div>
             </div>
 
@@ -1840,10 +1839,10 @@ export default function App() {
                 <LayoutDashboard size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Archives Dashboard ({archiveBatch})
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '15px', textAlign: 'center' }}>
-                {statCard('TOTAL ORDERS', archiveTotalOrders, 'var(--c-5c4033)', undefined, undefined, 'butter')}
-                {statCard('TOTAL QUANTITY (PCS)', archiveTotalQty, 'var(--c-5c4033)', undefined, undefined, 'peach')}
+                {statCard('TOTAL ORDERS', archiveTotalOrders, 'var(--c-5c4033)', undefined, undefined, 'rose')}
+                {statCard('TOTAL QUANTITY (PCS)', archiveTotalQty, 'var(--c-5c4033)', undefined, undefined, 'rose')}
                 {statCard('TOTAL SPENT', money(archiveTotalSpent), 'var(--c-bc6c25)', undefined, undefined, 'rose')}
-                {statCard('AVG SHIPPING DAYS', archiveAvgDays !== '-' ? `${archiveAvgDays} days` : '-', 'var(--c-7f5539)', 'all archived orders', undefined, 'sky')}
+                {statCard('AVG SHIPPING DAYS', archiveAvgDays !== '-' ? `${archiveAvgDays} days` : '-', 'var(--c-7f5539)', 'all archived orders', undefined, 'rose')}
               </div>
             </div>
           </div>
@@ -1994,6 +1993,13 @@ export default function App() {
                     <ArrowRight size={14} /> Move Selected to Orders ({selectedWishlistIds.length})
                   </button>
                 )}
+                <button
+                  data-tour="add-btn"
+                  onClick={handleOpenAddWishlist}
+                  style={getButtonStyle('pink')}
+                >
+                  <Plus size={14} strokeWidth={3} /> Add Wishlist Item
+                </button>
               </div>
             </div>
 
