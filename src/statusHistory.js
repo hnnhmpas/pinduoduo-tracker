@@ -75,6 +75,25 @@ export function appendStatusChange(history, oldStatus, newStatus, date, orderDat
   return [...h, { status: newStatus, date }];
 }
 
+// Manual edits applied to many orders at once (Batch Edit).
+//   { action: 'set', status, date }  -> correct that status's date, or add the status if the order doesn't have it
+//   { action: 'remove', status }     -> drop that status from the history
+export function applyHistoryEdits(history, edits) {
+  let h = normalizeHistory(history);
+  for (const e of edits || []) {
+    if (!e || !e.status) continue;
+    if (e.action === 'remove') {
+      h = h.filter((x) => x.status !== e.status);
+    } else if (e.action === 'set' && isDate(e.date)) {
+      let idx = -1;
+      h.forEach((x, i) => { if (x.status === e.status) idx = i; });
+      h = idx >= 0 ? h.map((x, i) => (i === idx ? { ...x, date: e.date } : x)) : [...h, { status: e.status, date: e.date }];
+      h = normalizeHistory(h);
+    }
+  }
+  return h;
+}
+
 // History an edit form should start from (adds the safe "Ordered" seed for untouched legacy orders)
 export function historyForEditing(order) {
   const h = normalizeHistory(order.statusHistory);

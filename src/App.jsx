@@ -12,7 +12,7 @@ import { PhotoReviewModal } from './PhotoReview.jsx';
 import { ExportModal } from './ExportModal.jsx';
 import {
   PIPELINE, STAGE_SHORT, localDateStr, normalizeHistory, entryDateFor, initialHistory, appendStatusChange,
-  historyForEditing, computeStageStats, computeRemainingStats, computeTotalStats, smartEstimate, fmtDays
+  historyForEditing, applyHistoryEdits, computeStageStats, computeRemainingStats, computeTotalStats, smartEstimate, fmtDays
 } from './statusHistory.js';
 import {
   ShoppingBag, LogIn, Search, X, BookOpen, Truck, Archive, ArchiveRestore, Undo2,
@@ -193,6 +193,7 @@ export default function App() {
   const [batchEditTargetOrderStatus, setBatchEditTargetOrderStatus] = useState(KEEP);
   const [batchEditTargetActualDelivery, setBatchEditTargetActualDelivery] = useState('');
   const [batchEditChangeDate, setBatchEditChangeDate] = useState('');   // '' = automatic (today / delivery date)
+  const [batchHistoryEdits, setBatchHistoryEdits] = useState([]);       // manual status-history edits for all selected orders
   
   const [batchEditBatchDropdownOpen, setBatchEditBatchDropdownOpen] = useState(false);
   const [batchEditShippingDropdownOpen, setBatchEditShippingDropdownOpen] = useState(false);
@@ -619,6 +620,7 @@ export default function App() {
     setBatchEditTargetOrderStatus(common(o => o.orderStatus || '', KEEP));
     setBatchEditTargetActualDelivery(common(o => o.actualDeliveryDate || '', ''));
     setBatchEditChangeDate('');
+    setBatchHistoryEdits([]);
     setBatchEditBatchDropdownOpen(false);
     setBatchEditShippingDropdownOpen(false);
     setBatchEditOrderStatusDropdownOpen(false);
@@ -635,7 +637,10 @@ export default function App() {
     if (batchEditTargetOrderStatus !== KEEP) changes.orderStatus = batchEditTargetOrderStatus;
     if (batchEditTargetActualDelivery) changes.actualDeliveryDate = batchEditTargetActualDelivery;
 
-    if (Object.keys(changes).length === 0) {
+    // Manual history edits: 'set' rows need a date, otherwise they are ignored
+    const validHistoryEdits = batchHistoryEdits.filter(e => e.status && (e.action === 'remove' || /^\d{4}-\d{2}-\d{2}$/.test(e.date || '')));
+
+    if (Object.keys(changes).length === 0 && validHistoryEdits.length === 0) {
       setIsBatchEditOpen(false);
       return;
     }
@@ -647,12 +652,20 @@ export default function App() {
         const existing = orders.find(o => String(o.id) === String(id));
         if (existing) {
           const payload = { ...changes };
-          // A different shipping status gets logged in the order's status history
           const oldStatus = existing.shippingStatus || 'Ordered';
+
+          // 1) your manual history edits
+          let hist = validHistoryEdits.length ? applyHistoryEdits(historyForEditing(existing), validHistoryEdits) : null;
+
+          // 2) a different shipping status gets logged too (unless you already set a date for that status above)
           if (changes.shippingStatus && changes.shippingStatus !== oldStatus) {
-            const when = batchEditChangeDate || entryDateFor(changes.shippingStatus, { actualDeliveryDate: changes.actualDeliveryDate || existing.actualDeliveryDate, fallback: todayLocal });
-            payload.statusHistory = appendStatusChange(existing.statusHistory, oldStatus, changes.shippingStatus, when, existing.date);
+            const setByHand = validHistoryEdits.some(e => e.action === 'set' && e.status === changes.shippingStatus);
+            if (!setByHand) {
+              const when = batchEditChangeDate || entryDateFor(changes.shippingStatus, { actualDeliveryDate: changes.actualDeliveryDate || existing.actualDeliveryDate, fallback: todayLocal });
+              hist = appendStatusChange(hist || existing.statusHistory, oldStatus, changes.shippingStatus, when, existing.date);
+            }
           }
+          if (hist) payload.statusHistory = hist;
           await setDoc(doc(db, "users", user.uid, "pdd_orders", String(id)), payload, { merge: true });
           updated++;
         }
@@ -1284,6 +1297,7 @@ export default function App() {
         setBatchEditTargetOrderStatus(KEEP);
         setBatchEditTargetActualDelivery('');
         setBatchEditChangeDate('');
+        setBatchHistoryEdits([]);
       }
       setIsBatchEditOpen(true);
     } else {
@@ -2674,6 +2688,47 @@ export default function App() {
                   onChange={(e) => setBatchEditTargetActualDelivery(e.target.value)} 
                   style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} 
                 />
+              </div>
+
+              {/* Manual status history edits for every selected order */}
+              <div style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '12px', padding: '10px 12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, color: 'var(--c-7f5539)', fontSize: '12px' }}>
+                  <Clock size={13} /> Status History (optional)
+                </div>
+                <div style={{ fontSize: '10.5px', color: 'var(--c-8c7a6b)', margin: '3px 0 8px', lineHeight: 1.4 }}>
+                  Applied to all {selectedOrderIds.length} selected orders. "Set date" fixes the date of a status, or adds it if an order doesn't have it yet.
+                </div>
+                {batchHistoryEdits.map((ed, idx) => {
+                  const fld = { padding: '7px 8px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '11.5px', background: 'var(--c-fffdfa)', color: 'var(--c-5c4033)', fontFamily: 'inherit' };
+                  const upd = (patch) => setBatchHistoryEdits(prev => prev.map((r, k) => (k === idx ? { ...r, ...patch } : r)));
+                  return (
+                    <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap' }}>
+                      <select value={ed.action} onChange={(e) => upd({ action: e.target.value })} style={{ ...fld, width: '96px' }}>
+                        <option value="set">Set date</option>
+                        <option value="remove">Remove</option>
+                      </select>
+                      <select value={ed.status} onChange={(e) => upd({ status: e.target.value })} style={{ ...fld, flex: 1, minWidth: '120px' }}>
+                        {shippingStatusOptions.map(st => <option key={st} value={st}>{st}</option>)}
+                      </select>
+                      {ed.action === 'set' && (
+                        <input type="date" value={ed.date} max={todayStr} onChange={(e) => upd({ date: e.target.value })} style={{ ...fld, width: '128px', borderColor: ed.date ? 'var(--c-e6ccb2)' : 'var(--c-ffd166)' }} aria-label="Date for this status" />
+                      )}
+                      <button type="button" aria-label="Remove this history edit" onClick={() => setBatchHistoryEdits(prev => prev.filter((_, k) => k !== idx))} style={{ background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', color: 'var(--c-7f5539)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <X size={11} strokeWidth={3} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {batchHistoryEdits.some(e => e.action === 'set' && !e.date) && (
+                  <div style={{ fontSize: '10.5px', color: 'var(--c-bc6c25)', marginBottom: '6px' }}>Rows without a date are skipped.</div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setBatchHistoryEdits(prev => [...prev, { action: 'set', status: batchEditTargetShipping !== KEEP ? batchEditTargetShipping : 'Ordered', date: '' }])}
+                  style={{ background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderRadius: '9999px', padding: '5px 12px', fontSize: '11px', fontWeight: 700, color: 'var(--c-7f5539)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', fontFamily: 'inherit' }}
+                >
+                  <Plus size={12} strokeWidth={3} /> Add history edit
+                </button>
               </div>
 
               {/* Cancel left, Action right */}
