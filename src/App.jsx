@@ -272,6 +272,13 @@ export default function App() {
   const [historyDraft, setHistoryDraft] = useState([]);          // status history shown in the edit form
   const [pendingChangeDate, setPendingChangeDate] = useState(''); // date for the status change being made ('' = automatic)
   const [isExportOpen, setIsExportOpen] = useState(false);
+  // "Average Days per Stage" panel: collapsed by default, and it remembers your choice on this device
+  const [stageOpen, setStageOpen] = useState(() => { try { return localStorage.getItem('pdd_stage_panel_open') === '1'; } catch { return false; } });
+  const toggleStageOpen = () => setStageOpen(prev => {
+    const next = !prev;
+    try { localStorage.setItem('pdd_stage_panel_open', next ? '1' : '0'); } catch { /* storage unavailable: fine */ }
+    return next;
+  });
 
   const [isWishlistModalOpen, setIsWishlistModalOpen] = useState(false);
   const [editingWishlistItem, setEditingWishlistItem] = useState(null);
@@ -991,7 +998,6 @@ export default function App() {
   const stageStats = computeStageStats(orders);
   const remainingStats = computeRemainingStats(orders);
   const totalStats = computeTotalStats(orders);
-  const stageSamples = Object.values(stageStats).reduce((acc, st) => acc + st.n, 0);
   const smartEstFor = (o) => (o.isTutorialSample ? null : smartEstimate(o, remainingStats, totalStats, todayStr));
 
   // Archive dashboard (archived orders only; includes the tour's sample row while the tour shows it)
@@ -1731,31 +1737,79 @@ export default function App() {
                 {statCard('AVG SHIPPING DAYS', avgShippingDays !== '-' ? `${avgShippingDays} days` : '-', 'var(--c-7f5539)', 'all orders, incl. archived', 'Standalone: counts every order (archived too) and ignores the batch filter. Only permanently deleting an order removes it from this average.', 'rose')}
               </div>
 
-              {/* Real average days per stage, learned from each order's status history */}
-              <div style={{ borderTop: '1px dashed var(--c-e6ccb2)', marginTop: '16px', paddingTop: '14px' }}>
-                <h3 style={{ fontSize: '12px', margin: '0 0 4px 0', textAlign: 'center', color: 'var(--c-7f5539)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
-                  <Clock size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Average Days per Stage
-                </h3>
-                <div style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', textAlign: 'center', marginBottom: '10px' }}>
-                  {stageSamples > 0
-                    ? `Learned from ${stageSamples} logged status change${stageSamples === 1 ? '' : 's'}. These also power the smarter delivery estimates.`
-                    : 'No stage times yet. Change an order\'s shipping status (Edit or Batch Edit) and the dates are logged automatically.'}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', textAlign: 'center' }}>
-                  {PIPELINE.map((stage) => {
-                    const sc = { 'Ordered': ['sand','var(--c-5c4033)'], 'At China Warehouse': ['warehouse','var(--c-5c4033)'], 'Dispatched / China Customs': ['customs','var(--c-03045e)'], 'In Transit to PH': ['transit','var(--c-5c4033)'], 'PH Customs Clearance': ['phcustoms','var(--c-3c096c)'], 'PH Hub / Out for Local Delivery': ['hub','var(--c-5c4033)'] }[stage];
-                    const st = stageStats[stage];
-                    return statCard(
-                      STAGE_SHORT[stage].toUpperCase(),
-                      st.avg != null ? `${fmtDays(st.avg)} days` : '-',
-                      sc[1],
-                      st.n > 0 ? `from ${st.n} order${st.n === 1 ? '' : 's'}` : 'no data yet',
-                      `Average time orders spend in "${stage}" before moving to the next stage.`,
-                      sc[0]
-                    );
-                  })}
-                </div>
-              </div>
+              {/* Average days per stage: one line when collapsed, a stage bar when opened */}
+              {(() => {
+                const withData = PIPELINE.filter(st => stageStats[st].avg != null);
+                const rule = { borderTop: '1px dashed var(--c-e6ccb2)', marginTop: '16px', paddingTop: '12px' };
+                if (withData.length === 0) {
+                  return (
+                    <div style={rule}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11.5px', color: 'var(--c-8c7a6b)' }}>
+                        <Clock size={14} style={{ flexShrink: 0 }} />
+                        <span><b style={{ color: 'var(--c-7f5539)' }}>Average days per stage</b> will appear here once you change an order's shipping status (Edit or Batch Edit).</span>
+                      </div>
+                    </div>
+                  );
+                }
+                const LOOK = {
+                  'Ordered': ['var(--tint-sand)', 'var(--c-5c4033)'],
+                  'At China Warehouse': ['var(--c-ffcfc9)', 'var(--c-5c4033)'],
+                  'Dispatched / China Customs': ['var(--c-c9daf8)', 'var(--c-03045e)'],
+                  'In Transit to PH': ['var(--c-fdd6a8)', 'var(--c-5c4033)'],
+                  'PH Customs Clearance': ['var(--c-e6cff2)', 'var(--c-3c096c)'],
+                  'PH Hub / Out for Local Delivery': ['var(--c-fcf2cd)', 'var(--c-5c4033)'],
+                };
+                const slowest = withData.reduce((a, b) => (stageStats[b].avg > stageStats[a].avg ? b : a));
+                const nOrders = (st) => `from ${stageStats[st].n} order${stageStats[st].n === 1 ? '' : 's'}`;
+                return (
+                  <div style={rule}>
+                    <button
+                      type="button"
+                      onClick={toggleStageOpen}
+                      aria-expanded={stageOpen}
+                      title={stageOpen ? 'Hide average days per stage' : 'Show average days per stage'}
+                      style={{ width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px 14px', flexWrap: 'wrap', fontFamily: 'inherit', textAlign: 'left' }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 700, color: 'var(--c-7f5539)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                        <Clock size={14} /> Average Days per Stage
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', fontSize: '11.5px', color: 'var(--c-5c4033)', fontWeight: 600 }}>
+                        {avgShippingDays !== '-' && <span>{avgShippingDays} days overall</span>}
+                        {avgShippingDays !== '-' && <span style={{ color: 'var(--c-c9b8a8)' }}>|</span>}
+                        <span>Slowest: <span style={{ background: LOOK[slowest][0], color: LOOK[slowest][1], padding: '2px 8px', borderRadius: '9999px', fontWeight: 700 }}>{STAGE_SHORT[slowest]} {fmtDays(stageStats[slowest].avg)}d</span></span>
+                        <span style={{ color: 'var(--c-7f5539)', display: 'flex', background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '26px', height: '26px', alignItems: 'center', justifyContent: 'center' }}>
+                          {stageOpen ? <ChevronUp size={16} strokeWidth={2.5} /> : <ChevronDown size={16} strokeWidth={2.5} />}
+                        </span>
+                      </span>
+                    </button>
+
+                    {stageOpen && (
+                      <div style={{ marginTop: '12px' }}>
+                        <div style={{ display: 'flex', borderRadius: '9px', overflow: 'hidden', border: '1px solid var(--c-e6ccb2)' }}>
+                          {withData.map(st => (
+                            <div
+                              key={st}
+                              title={`${STAGE_SHORT[st]}: ${fmtDays(stageStats[st].avg)} days on average, ${nOrders(st)}`}
+                              style={{ flex: Math.max(stageStats[st].avg, 0.8), minWidth: '28px', background: LOOK[st][0], color: LOOK[st][1], height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, borderRight: '2px solid var(--c-fcf6f0)', boxShadow: st === slowest ? 'inset 0 0 0 2px rgba(188,108,37,0.55)' : 'none' }}
+                            >
+                              {fmtDays(stageStats[st].avg)}d
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', marginTop: '10px' }}>
+                          {PIPELINE.map(st => (
+                            <span key={st} title={stageStats[st].n > 0 ? nOrders(st) : undefined} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--c-5c4033)' }}>
+                              <span style={{ width: '10px', height: '10px', borderRadius: '3px', background: LOOK[st][0], border: '1px solid var(--c-e6ccb2)' }} />
+                              <b>{STAGE_SHORT[st]}</b>
+                              <span style={{ color: 'var(--c-8c7a6b)' }}>{stageStats[st].avg != null ? `${fmtDays(stageStats[st].avg)} days` : 'no data yet'}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 

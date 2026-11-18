@@ -183,4 +183,9 @@ export function smartEstimate(order, remaining, total, today) {
   return null;
 }
 
-export const fmtDays = (n) => (n == null ? '-' : (Math.round(n * 10) / 10).toString().replace(/\.0$/, ''));
+// Averages are shown as whole days (no decimals). Anything under half a day shows as "<1".
+export const fmtDays = (n) => {
+  if (n == null) return '-';
+  const r = Math.round(n);
+  return r === 0 && n > 0 ? '<1' : String(r);
+};
