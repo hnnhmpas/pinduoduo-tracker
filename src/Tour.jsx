@@ -13,9 +13,9 @@ import { ShoppingBag, Lightbulb } from 'lucide-react';
    Fields:
      id          unique key (also used to find jump targets)
      target      value of the data-tour="..." attribute to spotlight
-     part        1 | 2 | 3   (shown as a small label in the tooltip)
+     part        1 | 2 | 3 | 4 | 5   (shown as a small label in the tooltip)
      tab         'orders' | 'wishlist'  – tab that must be showing
-     modal       null | 'order' | 'wishlist' | 'batch'
+     modal       null | 'order' | 'wishlist' | 'batch' | 'photo-review'
      sample      null | 'order' | 'order-delivered' | 'order-archived' | 'wishlist'
                  – a row must exist (a real entry made during the tour, or a
                  temporary sample; the delivered/archived kinds are always samples)
@@ -31,7 +31,8 @@ export const TOUR_PARTS = {
   1: { en: 'Adding an Order', tl: 'Pag-log ng Order' },
   2: { en: 'Managing Orders & Batch Editing', tl: 'Pag-manage ng Orders at Batch Edit' },
   3: { en: 'Archive & Restore', tl: 'Archive at Restore' },
-  4: { en: 'Wishlist & Moving Items', tl: 'Wishlist at Paglipat ng Items' },
+  4: { en: 'Photo Review', tl: 'Photo Review' },
+  5: { en: 'Wishlist & Moving Items', tl: 'Wishlist at Paglipat ng Items' },
 };
 
 export const TOUR_STEPS = [
@@ -210,86 +211,116 @@ export const TOUR_STEPS = [
     },
   },
 
-  /* ---------- PART 4: WISHLIST TAB & MOVING ITEMS ---------- */
+  /* ---------- PART 4: PHOTO REVIEW ---------- */
   {
-    id: 'tab-wishlist', target: 'tab-wishlist', part: 4, tab: 'orders', modal: null, sample: 'order',
+    id: 'photo-review-btn', target: 'photo-review-btn', part: 4, tab: 'orders', modal: null, sample: 'order-delivered',
+    text: {
+      en: 'Delivered orders also get a camera button, in General Orders and in the Archive. Click it to Generate Photo Review: a ready-to-share picture of your order with your star rating.',
+      tl: 'Kapag Delivered na ang order, may lalabas ding camera button sa row nito, sa General Orders at sa Archive. Pindutin ito para mag-Generate Photo Review: isang litratong may star rating, handang i-share.',
+    },
+  },
+  {
+    id: 'pr-photos', target: 'pr-photos', part: 4, tab: 'orders', modal: 'photo-review', sample: 'order-delivered',
+    text: {
+      en: 'Upload the actual photo of what you received, then a screenshot of the listing (showing the product picture and its name). Both are centered on the subject automatically. You can drag or zoom to fine-tune.',
+      tl: 'I-upload ang actual na litrato ng natanggap mo, at ang screenshot ng listing (kita ang picture at pangalan ng item). Awtomatiko silang nasesentro sa mismong item. Pwede mo ring i-drag o i-zoom para ayusin.',
+    },
+  },
+  {
+    id: 'pr-rating', target: 'pr-rating', part: 4, tab: 'orders', modal: 'photo-review', sample: 'order-delivered',
+    text: {
+      en: 'Rate the order from 1 to 5 stars, just like in your favorite shopping app.',
+      tl: 'I-rate ang order mula 1 hanggang 5 stars, parang sa mga shopping app.',
+    },
+  },
+  {
+    id: 'pr-generate', target: 'pr-generate', part: 4, tab: 'orders', modal: 'photo-review', sample: 'order-delivered',
+    text: {
+      en: 'Generate & Download creates the image on your device. Nothing is saved: your photos are discarded right after you download.',
+      tl: 'Pindutin ang Generate & Download para magawa at ma-download ang image sa device mo. Walang nase-save: mabubura ang mga photo mo pagkatapos mag-download.',
+    },
+  },
+
+  /* ---------- PART 5: WISHLIST TAB & MOVING ITEMS ---------- */
+  {
+    id: 'tab-wishlist', target: 'tab-wishlist', part: 5, tab: 'orders', modal: null, sample: 'order',
     text: {
       en: 'Here you can log items that are on your wishlist. It helps you track how many items you are looking to check out, the cost, and if the items get cheaper.',
       tl: 'Dito, pwede mong ilista ang mga items na nasa wishlist mo. Makikita mo kung ilang items na ang gusto mong i-checkout, kung magkano, at kung mas nagmura ba sila.',
     },
   },
   {
-    id: 'add-wishlist-btn', target: 'add-btn', part: 4, tab: 'wishlist', modal: null,
+    id: 'add-wishlist-btn', target: 'add-btn', part: 5, tab: 'wishlist', modal: null,
     text: {
       en: 'Click here to add an item to your wishlist.',
       tl: 'Pindutin ito para magdagdag ng item sa iyong wishlist.',
     },
   },
   {
-    id: 'wl-name', target: 'wl-name', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-name', target: 'wl-name', part: 5, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: 'Put the name of the item here.',
       tl: 'Ilagay ang pangalan ng item dito.',
     },
   },
   {
-    id: 'wl-qty', target: 'wl-qty', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-qty', target: 'wl-qty', part: 5, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: 'Put the desired quantity of the item you want to check out.',
       tl: 'Ilagay dito kung ilang quantity ng item ang gusto mong i-checkout.',
     },
   },
   {
-    id: 'wl-initial', target: 'wl-initial', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-initial', target: 'wl-initial', part: 5, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: 'Enter the price of the item when you first saw it.',
       tl: 'Ilagay dito kung magkano ang item nung una mo itong nakita.',
     },
   },
   {
-    id: 'wl-latest', target: 'wl-latest', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-latest', target: 'wl-latest', part: 5, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: 'Enter the new price of the item after checking again with vouchers or promos applied. This can be left blank if there are no changes to the price.',
       tl: 'Ilagay dito kung magkano na ang item matapos i-check ulit nang may naka-apply na voucher o promo. Maaari itong hindi lagyan kung wala pang changes sa amount.',
     },
   },
   {
-    id: 'wl-add', target: 'wl-add', part: 4, tab: 'wishlist', modal: 'wishlist', interactive: true,
+    id: 'wl-add', target: 'wl-add', part: 5, tab: 'wishlist', modal: 'wishlist', interactive: true,
     text: {
       en: "Don't forget to add your entry!",
       tl: "'Wag kalimutang i-add ang entry mo!",
     },
   },
   {
-    id: 'wl-row', target: 'wl-row', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-row', target: 'wl-row', part: 5, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: 'This is your inputted wishlist item entry.',
       tl: 'Ito ang iyong ni-log na item.',
     },
   },
   {
-    id: 'wl-flag', target: 'wl-flag', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-flag', target: 'wl-flag', part: 5, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: 'If there is a change in the price of the item (like a price drop), it will show here.',
       tl: 'Kung may pagbabago sa presyo ng item, lalabas ito dito.',
     },
   },
   {
-    id: 'wl-edit', target: 'wl-edit', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-edit', target: 'wl-edit', part: 5, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: 'Edit any information from your wishlist item here.',
       tl: 'Pwedeng i-edit ang kahit anong information sa iyong wishlist item mula dito.',
     },
   },
   {
-    id: 'wl-move', target: 'wl-move', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-move', target: 'wl-move', part: 5, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: 'Once a wishlist item gets ordered, click Move to automatically transfer it to the general order tracker. If moved by mistake, click Undo to move it back.',
       tl: 'Pag ang wishlist item ay na-order na, pwedeng pindutin ang Move para malipat ang order mo sa general tracker. Kung namali ng pagkakalipat, pwedeng pindutin ang Undo para mabalik sa wishlist tracker.',
     },
   },
   {
-    id: 'wl-delete', target: 'wl-delete', part: 4, tab: 'wishlist', modal: null, sample: 'wishlist',
+    id: 'wl-delete', target: 'wl-delete', part: 5, tab: 'wishlist', modal: null, sample: 'wishlist',
     text: {
       en: "Delete any items that you've logged. Deleted items are permanently removed!",
       tl: 'Burahin ang items na ni-log. Ang mga item na dinelete ay permanente nang mawawala sa tracker!',

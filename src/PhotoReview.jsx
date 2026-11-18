@@ -279,7 +279,12 @@ function PhotoSlot({ title, hint, slot, onFile, onClear, onZoom, onAuto, error }
   );
 }
 
-export function PhotoReviewModal({ order, onClose }) {
+export function PhotoReviewModal({ order, queue = [], onGenerated, onClose }) {
+  // A review queue: `order` first, then the orders in `queue`, one after another
+  const [current, setCurrent] = useState(order);
+  const [rest, setRest] = useState(queue);
+  const total = useRef(1 + queue.length).current;
+  const position = total - rest.length;
   const [actual, setActual] = useState(null);       // { img, name, zoom, fx, fy }
   const [reference, setReference] = useState(null);
   const [rating, setRating] = useState(0);
@@ -386,7 +391,7 @@ export function PhotoReviewModal({ order, onClose }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `photo-review-${slug(order.name)}.png`;
+      a.download = `photo-review-${slug(current.name)}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -396,6 +401,7 @@ export function PhotoReviewModal({ order, onClose }) {
       releaseSlot(actual); releaseSlot(reference);
       setActual(null); setReference(null); setRating(0); setHover(0);
       setStage('done');
+      if (onGenerated) onGenerated(current);   // the order gets its "Reviewed" tag
     } catch (err) {
       setGenError(err.message || 'Something went wrong while generating the image.');
     } finally {
@@ -404,6 +410,16 @@ export function PhotoReviewModal({ order, onClose }) {
   };
 
   const shown = hover || rating;
+
+  // Move on to the next order in the queue (photos and rating start fresh)
+  const goNext = () => {
+    if (rest.length === 0) { onClose(); return; }
+    releaseSlot(actual); releaseSlot(reference);
+    setActual(null); setReference(null); setRating(0); setHover(0); setErrors({}); setGenError('');
+    setCurrent(rest[0]);
+    setRest(rest.slice(1));
+    setStage('edit');
+  };
 
   return (
     <div
@@ -416,7 +432,10 @@ export function PhotoReviewModal({ order, onClose }) {
             <h2 style={{ fontSize: '16px', margin: 0, color: 'var(--c-7f5539)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Camera size={17} /> Generate Photo Review
             </h2>
-            <div style={{ fontSize: '12px', color: 'var(--c-5c4033)', fontWeight: 600, marginTop: '4px', wordBreak: 'break-word' }}>{order.name}</div>
+            <div style={{ fontSize: '12px', color: 'var(--c-5c4033)', fontWeight: 600, marginTop: '4px', wordBreak: 'break-word' }}>
+              {total > 1 && <span style={{ background: 'var(--c-fcf2cd)', border: '1px solid var(--c-ffd166)', borderRadius: '9999px', padding: '1px 8px', fontSize: '10.5px', fontWeight: 700, marginRight: '8px', whiteSpace: 'nowrap' }}>Review {position} of {total}</span>}
+              {current.name}
+            </div>
           </div>
           <button onClick={onClose} aria-label="Close" style={{ background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '28px', height: '28px', cursor: 'pointer', color: 'var(--c-7f5539)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <X size={14} />
@@ -430,11 +449,23 @@ export function PhotoReviewModal({ order, onClose }) {
             </div>
             <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--c-7f5539)', marginTop: '12px' }}>Your photo review is downloading</div>
             <div style={{ fontSize: '12px', color: 'var(--c-8c7a6b)', marginTop: '6px', maxWidth: '420px', marginInline: 'auto', lineHeight: 1.5 }}>
-              The photos you uploaded were discarded. Nothing was saved or sent anywhere.
+              The photos you uploaded were discarded. Nothing was saved or sent anywhere. This order is now tagged Reviewed.
             </div>
+            {rest.length > 0 && (
+              <div style={{ fontSize: '12px', color: 'var(--c-5c4033)', marginTop: '10px', fontWeight: 600, wordBreak: 'break-word' }}>Up next: {rest[0].name}</div>
+            )}
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '18px', flexWrap: 'wrap' }}>
-              <button type="button" onClick={() => setStage('edit')} style={{ ...smallBtn, padding: '9px 16px', fontSize: '12px' }}>Make another</button>
-              <button type="button" onClick={onClose} style={{ background: 'var(--c-ffd166)', border: '1px solid var(--c-e6ccb2)', borderRadius: '9999px', padding: '9px 20px', fontSize: '12px', fontWeight: 700, color: 'var(--c-5c4033)', cursor: 'pointer', fontFamily: 'inherit' }}>Done</button>
+              {rest.length > 0 ? (
+                <>
+                  <button type="button" onClick={onClose} style={{ ...smallBtn, padding: '9px 16px', fontSize: '12px' }}>Done for now</button>
+                  <button type="button" onClick={goNext} style={{ background: 'var(--c-ffd166)', border: '1px solid var(--c-e6ccb2)', borderRadius: '9999px', padding: '9px 20px', fontSize: '12px', fontWeight: 700, color: 'var(--c-5c4033)', cursor: 'pointer', fontFamily: 'inherit', maxWidth: '100%' }}>Next review ({rest.length} left)</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setStage('edit')} style={{ ...smallBtn, padding: '9px 16px', fontSize: '12px' }}>Make another</button>
+                  <button type="button" onClick={onClose} style={{ background: 'var(--c-ffd166)', border: '1px solid var(--c-e6ccb2)', borderRadius: '9999px', padding: '9px 20px', fontSize: '12px', fontWeight: 700, color: 'var(--c-5c4033)', cursor: 'pointer', fontFamily: 'inherit' }}>Done</button>
+                </>
+              )}
             </div>
           </div>
         ) : (
@@ -454,12 +485,14 @@ export function PhotoReviewModal({ order, onClose }) {
             </div>
 
             <div style={{ flex: '1 1 300px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '12px' }}>
+              <div data-tour="pr-photos" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <PhotoSlot title="Actual photo" hint="The photo of what you received" slot={actual} error={errors.actual}
                 onFile={(f) => handleFile('actual', f)} onClear={() => clearSlot('actual')} onZoom={(z) => zoomSlot('actual', z)} onAuto={() => autoSlot('actual')} />
               <PhotoSlot title="Reference photo" hint="Screenshot of the listing (picture + name)" slot={reference} error={errors.reference}
                 onFile={(f) => handleFile('reference', f)} onClear={() => clearSlot('reference')} onZoom={(z) => zoomSlot('reference', z)} onAuto={() => autoSlot('reference')} />
+              </div>
 
-              <div>
+              <div data-tour="pr-rating">
                 <span style={label}>How would you rate this order?</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }} onMouseLeave={() => setHover(0)}>
                   {[1, 2, 3, 4, 5].map((n) => (
@@ -481,7 +514,7 @@ export function PhotoReviewModal({ order, onClose }) {
                 </div>
               </div>
 
-              <div>
+              <div data-tour="pr-generate">
                 <button
                   type="button"
                   onClick={generate}
@@ -492,6 +525,11 @@ export function PhotoReviewModal({ order, onClose }) {
                 </button>
                 {!ready && <div style={{ fontSize: '10.5px', color: 'var(--c-8c7a6b)', marginTop: '6px', textAlign: 'center' }}>Still needed: {missing.join(', ')}</div>}
                 {genError && <div style={{ fontSize: '11px', color: 'var(--c-780000)', marginTop: '6px', textAlign: 'center' }}>{genError}</div>}
+                {rest.length > 0 && (
+                  <div style={{ textAlign: 'center', marginTop: '8px' }}>
+                    <button type="button" onClick={goNext} style={{ ...smallBtn, padding: '6px 14px' }}>Skip this one ({rest.length} left)</button>
+                  </div>
+                )}
                 <div style={{ fontSize: '10.5px', color: 'var(--c-8c7a6b)', marginTop: '8px', textAlign: 'center', lineHeight: 1.4 }}>Photos stay in your browser and are discarded right after you download.</div>
               </div>
             </div>

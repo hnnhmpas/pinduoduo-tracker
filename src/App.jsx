@@ -9,10 +9,15 @@ import {
 } from './Tour.jsx';
 import { BatchPicker, buildBatchInfo } from './BatchPicker.jsx';
 import { PhotoReviewModal } from './PhotoReview.jsx';
+import { ExportModal } from './ExportModal.jsx';
+import {
+  PIPELINE, STAGE_SHORT, localDateStr, normalizeHistory, entryDateFor, initialHistory, appendStatusChange,
+  historyForEditing, computeStageStats, computeRemainingStats, computeTotalStats, smartEstimate, fmtDays
+} from './statusHistory.js';
 import {
   ShoppingBag, LogIn, Search, X, BookOpen, Truck, Archive, ArchiveRestore, Undo2,
   LayoutDashboard, Package, Heart, Pencil, Trash2, Check, ArrowDown, ArrowUp, ArrowRight,
-  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Moon, Sun, Plus, Camera
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Moon, Sun, Plus, Camera, Sparkles, Download, Clock, Star
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -53,6 +58,7 @@ const orderSearchFields = (o) => [
   ['Status', o.orderStatus === 'OK ✔' ? 'OK' : o.orderStatus],
   ['Date ordered', o.date],
   ['Delivered on', o.actualDeliveryDate],
+  ['Photo review', o.shippingStatus === 'Delivered' ? (o.reviewed ? 'Reviewed' : 'Review pending') : ''],
   ['Est. delivery', o.estDelivery],
   ['Quantity', o.qty],
   ['Cost', o.cost],
@@ -186,6 +192,7 @@ export default function App() {
   const [batchEditTargetShipping, setBatchEditTargetShipping] = useState(KEEP);
   const [batchEditTargetOrderStatus, setBatchEditTargetOrderStatus] = useState(KEEP);
   const [batchEditTargetActualDelivery, setBatchEditTargetActualDelivery] = useState('');
+  const [batchEditChangeDate, setBatchEditChangeDate] = useState('');   // '' = automatic (today / delivery date)
   
   const [batchEditBatchDropdownOpen, setBatchEditBatchDropdownOpen] = useState(false);
   const [batchEditShippingDropdownOpen, setBatchEditShippingDropdownOpen] = useState(false);
@@ -261,12 +268,16 @@ export default function App() {
   // MODAL STATES
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [historyDraft, setHistoryDraft] = useState([]);          // status history shown in the edit form
+  const [pendingChangeDate, setPendingChangeDate] = useState(''); // date for the status change being made ('' = automatic)
+  const [isExportOpen, setIsExportOpen] = useState(false);
 
   const [isWishlistModalOpen, setIsWishlistModalOpen] = useState(false);
   const [editingWishlistItem, setEditingWishlistItem] = useState(null);
 
   // Photo review generator (client-side only; nothing is saved to Firebase)
   const [photoReviewOrder, setPhotoReviewOrder] = useState(null);
+  const [photoReviewQueue, setPhotoReviewQueue] = useState([]);   // more delivered orders waiting for a review after this one
 
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [guideActiveStep, setGuideActiveStep] = useState(null);
@@ -369,11 +380,29 @@ export default function App() {
     };
   };
 
+  // Photo review status of a Delivered order: pending (yellow) or reviewed (green). Click it to flip it by hand.
+  const reviewTag = (order) => {
+    if (order.shippingStatus !== 'Delivered' || order.isTutorialSample) return null;
+    const done = !!order.reviewed;
+    return (
+      <button
+        type="button"
+        onClick={() => setOrderReviewed(order, !done)}
+        title={done ? `Photo review done${order.reviewedAt ? ` on ${order.reviewedAt}` : ''}. Click to mark it as pending again.` : 'Photo review pending. Click to mark it as done (for example if you posted one elsewhere).'}
+        style={{ background: done ? 'var(--c-d4edbc)' : 'var(--c-fcf2cd)', color: done ? 'var(--c-1b4332)' : 'var(--c-5c4033)', border: `1px solid ${done ? 'transparent' : 'var(--c-ffd166)'}`, borderRadius: '9999px', padding: '2px 8px', fontSize: '10px', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontFamily: 'inherit', marginTop: '5px', whiteSpace: 'nowrap' }}
+      >
+        {done ? <Check size={10} strokeWidth={3} /> : <Star size={10} strokeWidth={2.5} />}
+        {done ? 'Reviewed' : 'Review pending'}
+      </button>
+    );
+  };
+
   // Shown on any order marked Delivered, in General Orders or the Archive
   const photoReviewButton = (order) => (order.shippingStatus === 'Delivered' ? (
     <button
       type="button"
-      onClick={() => setPhotoReviewOrder(order)}
+      {...ttO(order, 'photo-review-btn')}
+      onClick={() => { setPhotoReviewQueue([]); setPhotoReviewOrder(order); }}
       style={{ ...getButtonStyle('primary'), padding: '8px 10px' }}
       title="Generate Photo Review"
       aria-label="Generate Photo Review"
@@ -456,6 +485,8 @@ export default function App() {
 
   const handleOpenAddOrder = () => {
     setEditingOrder(null);
+    setHistoryDraft([]);
+    setPendingChangeDate('');
     setOrderFormData({
       name: '',
       qty: 1,
@@ -472,6 +503,8 @@ export default function App() {
 
   const handleOpenEditOrder = (order) => {
     setEditingOrder(order);
+    setHistoryDraft(historyForEditing(order));
+    setPendingChangeDate('');
     setOrderFormData({
       name: order.name,
       qty: order.qty,
@@ -509,6 +542,24 @@ export default function App() {
     }
 
     const orderId = editingOrder ? String(editingOrder.id) : String(Date.now());
+
+    // Status history: log the change (with its date) whenever the shipping status is different from before
+    const todayLocal = localDateStr();
+    let statusHistory;
+    if (editingOrder) {
+      const base = normalizeHistory(historyDraft);
+      const oldStatus = editingOrder.shippingStatus || 'Ordered';
+      statusHistory = orderFormData.shippingStatus !== oldStatus
+        ? appendStatusChange(
+            base, oldStatus, orderFormData.shippingStatus,
+            pendingChangeDate || entryDateFor(orderFormData.shippingStatus, { actualDeliveryDate: orderFormData.actualDeliveryDate, fallback: todayLocal }),
+            orderFormData.date
+          )
+        : base;
+    } else {
+      statusHistory = initialHistory(orderFormData.shippingStatus, { orderDate: orderFormData.date, actualDeliveryDate: orderFormData.actualDeliveryDate, fallback: todayLocal });
+    }
+
     const orderPayload = {
       name: orderFormData.name,
       qty: Number(orderFormData.qty),
@@ -519,7 +570,9 @@ export default function App() {
       orderStatus: orderFormData.orderStatus,
       notes: orderFormData.notes,
       actualDeliveryDate: orderFormData.actualDeliveryDate,
-      estDelivery: calculateEstDelivery(orderFormData.date)
+      estDelivery: calculateEstDelivery(orderFormData.date),
+      statusHistory,
+      ...(editingOrder ? { reviewed: !!editingOrder.reviewed, reviewedAt: editingOrder.reviewedAt || '' } : {})
     };
 
     try {
@@ -531,6 +584,24 @@ export default function App() {
 
     setIsOrderModalOpen(false);
     setEditingOrder(null);
+  };
+
+  // PHOTO REVIEW TAG: saved on the order. Sample (tour) rows are never written to Firebase.
+  const setOrderReviewed = async (order, value) => {
+    if (!order || order.isTutorialSample) return;
+    try {
+      await setDoc(doc(db, "users", user.uid, "pdd_orders", String(order.id)), { reviewed: !!value, reviewedAt: value ? localDateStr() : '' }, { merge: true });
+    } catch (error) {
+      console.error("Error updating review tag: ", error);
+    }
+  };
+  const isPendingReview = (o) => o.shippingStatus === 'Delivered' && !o.reviewed && !o.isTutorialSample;
+  // Review queue: the pending delivered orders in the list being shown, one after another
+  const startReviewQueue = (list) => {
+    const pending = list.filter(isPendingReview);
+    if (pending.length === 0) return;
+    setPhotoReviewQueue(pending.slice(1));
+    setPhotoReviewOrder(pending[0]);
   };
 
   // OPEN BATCH EDIT: pre-fill with whatever the selected orders already have in common.
@@ -547,6 +618,7 @@ export default function App() {
     setBatchEditTargetShipping(common(o => o.shippingStatus || 'Ordered', KEEP));
     setBatchEditTargetOrderStatus(common(o => o.orderStatus || '', KEEP));
     setBatchEditTargetActualDelivery(common(o => o.actualDeliveryDate || '', ''));
+    setBatchEditChangeDate('');
     setBatchEditBatchDropdownOpen(false);
     setBatchEditShippingDropdownOpen(false);
     setBatchEditOrderStatusDropdownOpen(false);
@@ -570,10 +642,18 @@ export default function App() {
 
     try {
       let updated = 0;
+      const todayLocal = localDateStr();
       for (const id of selectedOrderIds) {
-        const exists = orders.some(o => String(o.id) === String(id));
-        if (exists) {
-          await setDoc(doc(db, "users", user.uid, "pdd_orders", String(id)), changes, { merge: true });
+        const existing = orders.find(o => String(o.id) === String(id));
+        if (existing) {
+          const payload = { ...changes };
+          // A different shipping status gets logged in the order's status history
+          const oldStatus = existing.shippingStatus || 'Ordered';
+          if (changes.shippingStatus && changes.shippingStatus !== oldStatus) {
+            const when = batchEditChangeDate || entryDateFor(changes.shippingStatus, { actualDeliveryDate: changes.actualDeliveryDate || existing.actualDeliveryDate, fallback: todayLocal });
+            payload.statusHistory = appendStatusChange(existing.statusHistory, oldStatus, changes.shippingStatus, when, existing.date);
+          }
+          await setDoc(doc(db, "users", user.uid, "pdd_orders", String(id)), payload, { merge: true });
           updated++;
         }
       }
@@ -743,7 +823,8 @@ export default function App() {
           orderStatus: '',
           notes: 'Transferred from Wishlist',
           actualDeliveryDate: '',
-          estDelivery: calculateEstDelivery(today)
+          estDelivery: calculateEstDelivery(today),
+          statusHistory: initialHistory('Ordered', { orderDate: today, fallback: today })
         };
 
         await setDoc(doc(db, "users", user.uid, "pdd_orders", newOrderId), newOrder);
@@ -892,6 +973,14 @@ export default function App() {
   };
   const avgShippingDays = averageDays(orders);
 
+  // Real timing learned from status history (all real orders, archived included)
+  const todayStr = localDateStr();
+  const stageStats = computeStageStats(orders);
+  const remainingStats = computeRemainingStats(orders);
+  const totalStats = computeTotalStats(orders);
+  const stageSamples = Object.values(stageStats).reduce((acc, st) => acc + st.n, 0);
+  const smartEstFor = (o) => (o.isTutorialSample ? null : smartEstimate(o, remainingStats, totalStats, todayStr));
+
   // Archive dashboard (archived orders only; includes the tour's sample row while the tour shows it)
   const archiveBatchView = archiveBatch === 'All Batches' ? archivedForView : archivedForView.filter(o => o.batch === archiveBatch);
   const archiveTotalOrders = archiveBatchView.length;
@@ -901,7 +990,7 @@ export default function App() {
   const money = (n) => `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   // Soft pastel tints (theme-aware, defined in index.css) so the dashboard boxes stay light and easy to read
   // Status boxes reuse the exact shipping-badge colors; everything else uses one soft rose. No border lines.
-  const STATUS_BOX_BG = { customs: 'var(--c-c9daf8)', transit: 'var(--c-fdd6a8)', phcustoms: 'var(--c-e6cff2)', hub: 'var(--c-fcf2cd)', delivered: 'var(--c-d4edbc)' };
+  const STATUS_BOX_BG = { warehouse: 'var(--c-ffcfc9)', customs: 'var(--c-c9daf8)', transit: 'var(--c-fdd6a8)', phcustoms: 'var(--c-e6cff2)', hub: 'var(--c-fcf2cd)', delivered: 'var(--c-d4edbc)' };
   const tintBox = (tint = 'rose') => ({ background: STATUS_BOX_BG[tint] || `var(--tint-${tint})`, padding: '10px', borderRadius: '10px', border: 'none' });
   const statCard = (label, value, color, sub, title, tint) => (
     <div key={label} title={title} style={tintBox(tint)}>
@@ -1194,6 +1283,7 @@ export default function App() {
         setBatchEditTargetShipping(KEEP);
         setBatchEditTargetOrderStatus(KEEP);
         setBatchEditTargetActualDelivery('');
+        setBatchEditChangeDate('');
       }
       setIsBatchEditOpen(true);
     } else {
@@ -1424,6 +1514,13 @@ export default function App() {
             >
               <Truck size={14} /> Shipping Guide
             </button>
+            <button
+              onClick={() => setIsExportOpen(true)}
+              style={getButtonStyle('light')}
+              title="Download your data as CSV (backup / spreadsheet)"
+            >
+              <Download size={14} /> Export
+            </button>
 
             {/* STRAWBERRY CAT ACCOUNT / SIGNOUT POPUP BUTTON */}
             <div style={{ position: 'relative' }} ref={accountMenuRef}>
@@ -1619,6 +1716,32 @@ export default function App() {
                 {statCard('DELIVERED', deliveredCount, 'var(--c-1b4332)', 'all orders, incl. archived', 'Standalone: counts every delivered order (archived too) and ignores the batch filter.', 'delivered')}
                 {statCard('AVG SHIPPING DAYS', avgShippingDays !== '-' ? `${avgShippingDays} days` : '-', 'var(--c-7f5539)', 'all orders, incl. archived', 'Standalone: counts every order (archived too) and ignores the batch filter. Only permanently deleting an order removes it from this average.', 'rose')}
               </div>
+
+              {/* Real average days per stage, learned from each order's status history */}
+              <div style={{ borderTop: '1px dashed var(--c-e6ccb2)', marginTop: '16px', paddingTop: '14px' }}>
+                <h3 style={{ fontSize: '12px', margin: '0 0 4px 0', textAlign: 'center', color: 'var(--c-7f5539)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
+                  <Clock size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />Average Days per Stage
+                </h3>
+                <div style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', textAlign: 'center', marginBottom: '10px' }}>
+                  {stageSamples > 0
+                    ? `Learned from ${stageSamples} logged status change${stageSamples === 1 ? '' : 's'}. These also power the smarter delivery estimates.`
+                    : 'No stage times yet. Change an order\'s shipping status (Edit or Batch Edit) and the dates are logged automatically.'}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', textAlign: 'center' }}>
+                  {PIPELINE.map((stage) => {
+                    const sc = { 'Ordered': ['sand','var(--c-5c4033)'], 'At China Warehouse': ['warehouse','var(--c-5c4033)'], 'Dispatched / China Customs': ['customs','var(--c-03045e)'], 'In Transit to PH': ['transit','var(--c-5c4033)'], 'PH Customs Clearance': ['phcustoms','var(--c-3c096c)'], 'PH Hub / Out for Local Delivery': ['hub','var(--c-5c4033)'] }[stage];
+                    const st = stageStats[stage];
+                    return statCard(
+                      STAGE_SHORT[stage].toUpperCase(),
+                      st.avg != null ? `${fmtDays(st.avg)} days` : '-',
+                      sc[1],
+                      st.n > 0 ? `from ${st.n} order${st.n === 1 ? '' : 's'}` : 'no data yet',
+                      `Average time orders spend in "${stage}" before moving to the next stage.`,
+                      sc[0]
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1641,6 +1764,15 @@ export default function App() {
                     style={getButtonStyle('pink')}
                   >
                     <Pencil size={14} /> Batch Edit Selected ({selectedOrderIds.length})
+                  </button>
+                )}
+                {finalFilteredOrders.some(isPendingReview) && (
+                  <button
+                    onClick={() => startReviewQueue(finalFilteredOrders)}
+                    style={getButtonStyle('primary')}
+                    title="Make photo reviews for your delivered orders one after another"
+                  >
+                    <Camera size={14} /> Reviews Pending ({finalFilteredOrders.filter(isPendingReview).length})
                   </button>
                 )}
                 {deliveredInView.length > 0 && (
@@ -1787,6 +1919,7 @@ export default function App() {
                           >
                             {order.shippingStatus}
                           </span>
+                          {reviewTag(order) && <div>{reviewTag(order)}</div>}
                         </td>
                         <td>
                           {order.orderStatus ? (
@@ -1798,7 +1931,20 @@ export default function App() {
                           )}
                         </td>
                         <td style={{ color: 'var(--c-8c7a6b)', wordBreak: 'break-word' }}>{order.notes ? <Highlight text={order.notes} query={query} /> : '-'}</td>
-                        <td {...ttO(order, 'order-est')} style={{ color: 'var(--c-8c7a6b)' }}>{order.estDelivery}</td>
+                        <td {...ttO(order, 'order-est')} style={{ color: 'var(--c-8c7a6b)' }}>
+                          {(() => {
+                            const se = smartEstFor(order);
+                            if (!se) return order.estDelivery;
+                            const why = se.method === 'stage'
+                              ? `Smart estimate: from the day this order reached its current stage, your past deliveries took about ${fmtDays(se.avg)} more days (based on ${se.n} orders).`
+                              : `Smart estimate: order date plus your average shipping time of ${fmtDays(se.avg)} days (based on ${se.n} deliveries).`;
+                            return (
+                              <span title={`${why} Standard estimate: ${order.estDelivery}.`} style={{ color: 'var(--c-5c4033)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'help' }}>
+                                <Sparkles size={11} style={{ color: 'var(--c-bc6c25)', flexShrink: 0 }} />{se.date}
+                              </span>
+                            );
+                          })()}
+                        </td>
                         <td style={{ color: order.actualDeliveryDate ? 'var(--c-5c4033)' : 'var(--c-b0a499)' }}>
                           {order.actualDeliveryDate || '-'}
                         </td>
@@ -1875,6 +2021,15 @@ export default function App() {
                 {finalFilteredArchive.length} archived · not counted in the General Orders dashboard
               </span>
             </div>
+            {finalFilteredArchive.some(isPendingReview) && (
+              <button
+                onClick={() => startReviewQueue(finalFilteredArchive)}
+                style={getButtonStyle('primary')}
+                title="Make photo reviews for your archived orders one after another"
+              >
+                <Camera size={14} /> Reviews Pending ({finalFilteredArchive.filter(isPendingReview).length})
+              </button>
+            )}
           </div>
 
           <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', minWidth: '1400px' }}>
@@ -1918,7 +2073,7 @@ export default function App() {
                   const actualDays = calculateActualShippingDays(order.date, order.actualDeliveryDate);
                   return (
                     <tr key={order.id} style={{ borderBottom: '1px solid var(--c-fcf6f0)' }}>
-                      <td style={{ padding: '12px 8px', color: 'var(--c-5c4033)', wordBreak: 'break-word' }}><Highlight text={order.name} query={query} />{order.isTutorialSample && <SampleBadge />}</td>
+                      <td style={{ padding: '12px 8px', color: 'var(--c-5c4033)', wordBreak: 'break-word' }}><Highlight text={order.name} query={query} />{order.isTutorialSample && <SampleBadge />}{reviewTag(order) && <div>{reviewTag(order)}</div>}</td>
                       <td>{order.qty}</td>
                       <td>₱{Number(order.cost).toFixed(2)}</td>
                       <td style={{ color: 'var(--c-bc6c25)', fontWeight: 'bold' }}>₱{(order.qty * order.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -2305,7 +2460,7 @@ export default function App() {
                       {shippingStatusOptions.map(st => (
                         <div 
                           key={st}
-                          onClick={() => { setOrderFormData(prev => ({ ...prev, shippingStatus: st })); setModalShippingOpen(false); }}
+                          onClick={() => { setOrderFormData(prev => ({ ...prev, shippingStatus: st })); setPendingChangeDate(''); setModalShippingOpen(false); }}
                           style={{ padding: '6px 8px', fontSize: '11px', cursor: 'pointer', borderRadius: '6px', background: orderFormData.shippingStatus === st ? 'var(--c-ffd166)' : 'transparent', fontWeight: orderFormData.shippingStatus === st ? 'bold' : 'normal', color: 'var(--c-5c4033)' }}
                         >
                           {st}
@@ -2350,6 +2505,56 @@ export default function App() {
                   <input type="text" name="notes" value={orderFormData.notes} onChange={handleOrderInputChange} placeholder="Optional notes..." style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)', outline: 'none' }} />
                 </div>
               </div>
+
+              {editingOrder && (() => {
+                const origStatus = editingOrder.shippingStatus || 'Ordered';
+                const pending = orderFormData.shippingStatus !== origStatus ? orderFormData.shippingStatus : null;
+                const pendingAuto = pending ? entryDateFor(pending, { actualDeliveryDate: orderFormData.actualDeliveryDate, fallback: todayStr }) : '';
+                const fld = { padding: '7px 8px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '11.5px', background: 'var(--c-fffdfa)', color: 'var(--c-5c4033)', fontFamily: 'inherit' };
+                return (
+                  <div style={{ marginTop: '4px', background: 'var(--c-fcf6f0)', border: '1px solid var(--c-e6ccb2)', borderRadius: '12px', padding: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, color: 'var(--c-7f5539)', fontSize: '12px' }}>
+                      <Clock size={13} /> Status History
+                    </div>
+                    <div style={{ fontSize: '10.5px', color: 'var(--c-8c7a6b)', margin: '3px 0 9px', lineHeight: 1.4 }}>
+                      A new entry is logged when you change the shipping status. Fix any date here if you updated late.
+                    </div>
+                    {historyDraft.length === 0 && !pending && (
+                      <div style={{ fontSize: '11px', color: 'var(--c-8c7a6b)', marginBottom: '8px' }}>No history yet for this order. It starts logging from the next status change.</div>
+                    )}
+                    {historyDraft.map((h, idx) => (
+                      <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px' }}>
+                        <select value={h.status} onChange={(e) => setHistoryDraft(prev => prev.map((r, k) => (k === idx ? { ...r, status: e.target.value } : r)))} style={{ ...fld, flex: 1, minWidth: 0 }}>
+                          {shippingStatusOptions.map(st => <option key={st} value={st}>{st}</option>)}
+                        </select>
+                        <input type="date" value={h.date} max={todayStr} onChange={(e) => setHistoryDraft(prev => prev.map((r, k) => (k === idx ? { ...r, date: e.target.value } : r)))} style={{ ...fld, width: '128px' }} />
+                        <button type="button" aria-label="Remove history entry" onClick={() => setHistoryDraft(prev => prev.filter((_, k) => k !== idx))} style={{ background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', color: 'var(--c-7f5539)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <X size={11} strokeWidth={3} />
+                        </button>
+                      </div>
+                    ))}
+                    {pending && (
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ ...fld, flex: 1, minWidth: 0, background: 'var(--c-fcf2cd)', borderColor: 'var(--c-ffd166)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pending} <span style={{ fontWeight: 600, color: 'var(--c-8c7a6b)' }}>(new)</span></span>
+                        <input type="date" value={pendingChangeDate || pendingAuto} max={todayStr} onChange={(e) => setPendingChangeDate(e.target.value)} style={{ ...fld, width: '128px', borderColor: 'var(--c-ffd166)' }} />
+                        <span style={{ width: '24px', flexShrink: 0 }} />
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setHistoryDraft(prev => {
+                        const last = prev[prev.length - 1];
+                        const at = last ? PIPELINE.indexOf(last.status) : -1;
+                        const next = last ? (at >= 0 && at < PIPELINE.length - 1 ? PIPELINE[at + 1] : 'Delivered') : 'Ordered';
+                        return [...prev, { status: next, date: todayStr }];
+                      })}
+                      style={{ background: 'var(--c-fffdfa)', border: '1px solid var(--c-e6ccb2)', borderRadius: '9999px', padding: '5px 12px', fontSize: '11px', fontWeight: 700, color: 'var(--c-7f5539)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', fontFamily: 'inherit' }}
+                    >
+                      <Plus size={12} strokeWidth={3} /> Add past entry
+                    </button>
+                  </div>
+                );
+              })()}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
                 <button type="button" onClick={() => setIsOrderModalOpen(false)} style={getButtonStyle('light')}>Cancel</button>
@@ -2446,6 +2651,20 @@ export default function App() {
                 )}
               </div>
 
+              {batchEditTargetShipping !== KEEP && (
+                <div>
+                  <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Status change date (leave empty for today)</label>
+                  <input
+                    type="date"
+                    value={batchEditChangeDate}
+                    max={todayStr}
+                    onChange={(e) => setBatchEditChangeDate(e.target.value)}
+                    style={{ width: '100%', padding: '9px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid var(--c-e6ccb2)', fontSize: '12px', background: 'var(--c-fcf6f0)', color: 'var(--c-5c4033)' }}
+                  />
+                  {batchEditTargetShipping === 'Delivered' && <div style={{ fontSize: '10.5px', color: 'var(--c-8c7a6b)', marginTop: '3px' }}>For Delivered, the actual delivery date is used if you set one below.</div>}
+                </div>
+              )}
+
               {/* Target Actual Delivery Date */}
               <div>
                 <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', color: 'var(--c-7f5539)' }}>Actual Delivery Date (leave empty to keep current)</label>
@@ -2528,9 +2747,25 @@ export default function App() {
       )}
 
       {/* --- ADD / EDIT WISHLIST MODAL --- */}
-      {photoReviewOrder && (
-        <PhotoReviewModal order={photoReviewOrder} onClose={() => setPhotoReviewOrder(null)} />
+      {isExportOpen && (
+        <ExportModal orders={activeOrders} archived={archivedOrders} wishlist={wishlist} onClose={() => setIsExportOpen(false)} />
       )}
+
+      {/* During the tour the modal is driven by the step (using the sample order); otherwise by the Photo Review button */}
+      {(() => {
+        const shown = tourPhase === 'running'
+          ? (TOUR_STEPS[tourStepIndex].modal === 'photo-review' ? tourSampleOrder : null)
+          : photoReviewOrder;
+        return shown ? (
+          <PhotoReviewModal
+            key={shown.id}
+            order={shown}
+            queue={tourPhase === 'running' ? [] : photoReviewQueue}
+            onGenerated={(o) => setOrderReviewed(o, true)}
+            onClose={() => { setPhotoReviewOrder(null); setPhotoReviewQueue([]); }}
+          />
+        ) : null;
+      })()}
 
       {isWishlistModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '15px', boxSizing: 'border-box' }}>
